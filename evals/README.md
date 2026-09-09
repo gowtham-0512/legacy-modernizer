@@ -2,20 +2,26 @@
 
 This suite evaluates generated projects without calling an LLM, so results are reproducible and do not consume API quota.
 
-| Metric | Meaning | Release target |
-| --- | --- | --- |
-| Source files discovered | Scannable legacy source/config files exist. | At least 1 |
-| Artifact completeness | Required API, model, schema, database, requirements, and environment files exist. | 100% |
-| Python syntax pass rate | Generated Python can be parsed. | 100% |
-| Generated test result | The generated pytest suite runs successfully. | Pass |
-| Secret leaks detected | Generated output has no likely embedded credentials. | 0 |
+| Metric | Meaning | Target |
+| :--- | :--- | :--- |
+| **Source files discovered** | Scannable legacy source/config files exist. | At least 1 |
+| **Artifact completeness** | Profile-specific required files (FastAPI or Spring Boot) exist. | 100% |
+| **Syntax pass rate** | Generated Python (AST) or Java files have valid syntax. | 100% |
+| **Secret leaks detected** | Generated output contains 0 hardcoded credentials. | 0 |
+| **Fixture acceptance** | Domain models (e.g. `User`), fields, and endpoints are preserved. | 100% |
 
-Run from the repository root:
+### Running Evaluations
 
+From the repository root:
+
+#### 1. Evaluate Python Target (FastAPI + SQLAlchemy)
 ```powershell
-py evals\run_evals.py --source-dir test-fixtures\java --generated-dir path\to\generated-project
+python evals\run_evals.py --source-dir test-fixtures\java --generated-dir path\to\generated-project --target-profile fastapi-sqlalchemy
 ```
 
-Add `--run-tests` after installing the generated project's dependencies. Each run writes a timestamped JSON report to `evals/results/`.
+#### 2. Evaluate Java Target (Spring Boot 3 + JPA)
+```powershell
+python evals\run_evals.py --source-dir test-fixtures\java --generated-dir path\to\generated-project --target-profile spring-boot-jpa
+```
 
-A pass is not proof of behavioral equivalence. The next evaluation improvement is fixture-specific acceptance tests that assert expected APIs, status codes, and database behavior.
+Add `--run-tests` to execute generated integration tests. Each evaluation writes a timestamped JSON report to `evals/results/`.
