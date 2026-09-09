@@ -24,6 +24,12 @@ def health_check():
         "workspace_exists": WORKSPACE_ROOT.exists()
     }
 
+@app.get("/api/profiles")
+def get_target_profiles():
+    """Returns available target modernization stack profiles."""
+    from .profiles import list_profiles
+    return list_profiles()
+
 @app.post("/api/upload")
 async def upload_files(
     files: List[UploadFile] = File(...),
@@ -33,7 +39,7 @@ async def upload_files(
 ):
     """
     Accepts project files, saves them into an isolated job workspace in %LOCALAPPDATA%,
-    and triggers the modernization pipeline.
+    and triggers the modernization pipeline with the selected target stack.
     """
     job_id = uuid.uuid4().hex[:12]
     workspace = JobWorkspace(job_id)
@@ -51,11 +57,13 @@ async def upload_files(
                 buffer.write(content)
             saved_files.append(clean_filename)
 
+        chosen_stack = target_stack or "fastapi-sqlalchemy"
+
         # Create initial database record
         job_record = JobRecord(
             job_id=job_id,
             project_name=project_name or "legacy_project",
-            target_stack=target_stack or "fastapi-sqlalchemy",
+            target_stack=chosen_stack,
             status="IN_PROGRESS",
             progress_percent=10,
             total_files=len(saved_files)
@@ -63,12 +71,13 @@ async def upload_files(
         db.add(job_record)
         db.commit()
 
-        # Run AI modernization pipeline
+        # Run AI modernization pipeline with selected target stack
         from .ai_agent import modernize_project
         ai_result = modernize_project(
             upload_dir=workspace.input_dir,
             output_dir=workspace.output_dir,
-            export_path=workspace.export_zip_path
+            export_path=workspace.export_zip_path,
+            target_stack=chosen_stack
         )
 
         if ai_result.get("status") == "error":
