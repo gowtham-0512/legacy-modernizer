@@ -27,9 +27,8 @@ if env_path.exists():
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
-# Default recommended free-tier models
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
-BACKUP_GROQ_MODEL = "llama-3.1-8b-instant"
+# Default recommended models with failover
+DEFAULT_GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "llama-3.3-70b-versatile"]
 DEFAULT_GEMINI_MODELS = ["gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-2.5-flash"]
 
 def clean_and_parse_json(raw_text: str) -> Union[Dict[str, Any], list]:
@@ -71,8 +70,8 @@ def clean_and_parse_json(raw_text: str) -> Union[Dict[str, Any], list]:
     raise ValueError(f"Could not parse valid JSON from LLM response:\n{raw_text[:400]}...")
 
 
-def call_groq(system_prompt: str, user_prompt: str, json_mode: bool = True, model: str = DEFAULT_GROQ_MODEL) -> str:
-    """Invokes the Groq API using the groq Python SDK."""
+def call_groq(system_prompt: str, user_prompt: str, json_mode: bool = True) -> str:
+    """Invokes the Groq API with automatic model failover."""
     api_key = os.environ.get("GROQ_API_KEY", GROQ_API_KEY)
     if not api_key or api_key == "your_groq_api_key_here":
         raise ValueError("GROQ_API_KEY not configured or is placeholder.")
@@ -80,19 +79,28 @@ def call_groq(system_prompt: str, user_prompt: str, json_mode: bool = True, mode
     from groq import Groq
     client = Groq(api_key=api_key)
 
-    kwargs: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.1,
-    }
-    if json_mode:
-        kwargs["response_format"] = {"type": "json_object"}
+    last_error = None
+    for model_name in DEFAULT_GROQ_MODELS:
+        try:
+            print(f"[AI ENGINE] Calling Groq ({model_name})...")
+            kwargs: Dict[str, Any] = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.1,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
 
-    response = client.chat.completions.create(**kwargs)
-    return response.choices[0].message.content
+            response = client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except Exception as e:
+            last_error = e
+            print(f"[AI ENGINE] Groq model {model_name} notice: {e}. Trying next model...")
+
+    raise last_error or RuntimeError("All Groq models failed.")
 
 
 def call_gemini(system_prompt: str, user_prompt: str) -> str:
@@ -115,7 +123,7 @@ def call_gemini(system_prompt: str, user_prompt: str) -> str:
             return response.text
         except Exception as e:
             last_error = e
-            print(f"[AI ENGINE] Gemini model {model_name} failed: {e}. Trying next fallback...")
+            print(f"[AI ENGINE] Gemini model {model_name} notice: {e}. Trying next model...")
 
     raise last_error or RuntimeError("All Gemini fallback models failed.")
 
@@ -124,45 +132,28 @@ def generate_completion(
     system_instruction: str,
     user_prompt: str,
     json_mode: bool = True,
-    max_retries: int = 3
+    max_retries: int = 2
 ) -> str:
     """
-    Unified entry point with automatic failover:
-    1. Attempts Groq (Default / Primary provider).
-    2. Retries with backoff if rate limited (429).
-    3. Seamlessly falls back to Gemini if Groq fails or is unconfigured.
+    Unified entry point with dual-engine failover:
+    1. Attempts Groq (Primary provider).
+    2. Seamlessly falls back to Gemini if Groq fails or is unconfigured.
     """
     groq_key = os.environ.get("GROQ_API_KEY", GROQ_API_KEY)
     gemini_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
 
     errors = []
 
-    # 1. Try Groq if key exists
+    # 1. Try Groq as Primary
     if groq_key and groq_key != "your_groq_api_key_here":
-        for attempt in range(max_retries):
-            try:
-                print(f"[AI ENGINE] Calling Groq ({DEFAULT_GROQ_MODEL}) [Attempt {attempt + 1}]...")
-                return call_groq(system_instruction, user_prompt, json_mode=json_mode)
-            except Exception as err:
-                err_str = str(err)
-                errors.append(f"Groq Attempt {attempt + 1}: {err_str}")
-                if "429" in err_str or "rate_limit" in err_str.lower():
-                    # If 70b rate limited, try 8b instant
-                    try:
-                        print(f"[AI ENGINE] Groq 70b rate limited. Trying lighter model ({BACKUP_GROQ_MODEL})...")
-                        return call_groq(system_instruction, user_prompt, json_mode=json_mode, model=BACKUP_GROQ_MODEL)
-                    except Exception as e8b:
-                        errors.append(f"Groq 8b: {e8b}")
-                    wait_sec = 10 * (attempt + 1)
-                    print(f"[AI ENGINE] Groq rate limited. Waiting {wait_sec}s...")
-                    time.sleep(wait_sec)
-                else:
-                    print(f"[AI ENGINE] Groq error: {err_str}")
-                    break  # Non-rate-limit error: proceed directly to Gemini fallback
+        try:
+            return call_groq(system_instruction, user_prompt, json_mode=json_mode)
+        except Exception as err:
+            errors.append(f"Groq: {err}")
+            print(f"[AI ENGINE] Groq failed. Switching to Gemini fallback...")
 
     # 2. Fallback to Gemini
     if gemini_key and gemini_key != "your_gemini_api_key_here":
-        print("[AI ENGINE] Invoking Gemini fallback...")
         try:
             return call_gemini(system_instruction, user_prompt)
         except Exception as gem_err:
