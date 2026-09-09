@@ -392,19 +392,22 @@ def generate_modernization_report(inventory_str: str, bsg_str: str, generated_fi
     return "\n".join(lines)
 
 
-def modernize_project(upload_dir: str):
+def modernize_project(upload_dir, output_dir=None, export_path=None):
     """
     Whole-Project Modernization Pipeline:
     1. Scans and bundles all project files (.java, .sql, .properties, .xml, etc.)
     2. Agent 1 extracts full project inventory
     3. Agent 2 generates project-level BSG contract
     4. Feedback loop: Agent 3 generates multi-file project -> Agent 4 tests with pytest -> fixes if needed
-    5. Unpacks all generated files and writes MODERNIZATION_REPORT.md into modernized_files/
+    5. Unpacks all generated files and writes MODERNIZATION_REPORT.md into output_dir
     """
-    output_dir = PROJECT_ROOT / "modernized_files"
+    if output_dir is None:
+        from .config import WORKSPACE_ROOT
+        output_dir = WORKSPACE_ROOT / "modernized_files"
+    output_dir = Path(output_dir)
     if output_dir.exists():
         shutil.rmtree(output_dir, ignore_errors=True)
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # 1. Bundle all legacy project files
     print(f"Scanning and bundling files in '{upload_dir}'...")
