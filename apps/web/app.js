@@ -1,350 +1,293 @@
-// Legacy Modernizer V2 Client Application
+// Modernizer.ai - Alpine.js Application Controller
+function modernizerApp() {
+    return {
+        activeTab: 'modernize',
+        backendOnline: false,
+        profiles: [],
+        selectedProfile: 'fastapi-sqlalchemy',
+        profileDescription: 'Python: FastAPI + SQLAlchemy 2.0 (Default)',
+        projectName: 'Legacy_Enterprise_App',
+        files: [],
+        isDragging: false,
+        isProcessing: false,
+        jobStatus: 'IDLE',
+        jobStatusText: 'Ready',
+        currentStep: 1,
+        progressPercent: 0,
+        stageStatusDetail: 'Ready to ingest project artifacts',
+        currentJobId: null,
+        generatedFiles: [],
+        activeFile: null,
+        activeFileContent: '',
+        copied: false,
+        errorMessage: '',
+        history: [],
+        stageTimer: null,
 
-document.addEventListener("DOMContentLoaded", () => {
-    // State
-    let selectedFiles = [];
-    let currentJobId = null;
-    let targetProfiles = [];
-
-    // DOM Elements
-    const backendStatusDot = document.getElementById("backendStatusDot");
-    const backendStatusText = document.getElementById("backendStatusText");
-    const targetStackSelect = document.getElementById("targetStackSelect");
-    const targetStackHint = document.getElementById("targetStackHint");
-    const dropZone = document.getElementById("dropZone");
-    const fileInput = document.getElementById("fileInput");
-    const folderInput = document.getElementById("folderInput");
-    const fileSummary = document.getElementById("fileSummary");
-    const fileCountText = document.getElementById("fileCountText");
-    const clearFilesBtn = document.getElementById("clearFilesBtn");
-    const startModernizationBtn = document.getElementById("startModernizationBtn");
-    const projectNameInput = document.getElementById("projectName");
-
-    // Stepper & Progress Elements
-    const jobStatusBadge = document.getElementById("jobStatusBadge");
-    const progressFill = document.getElementById("progressFill");
-    const progressLabel = document.getElementById("progressLabel");
-    const pipelineErrorAlert = document.getElementById("pipelineErrorAlert");
-    const pipelineErrorMsg = document.getElementById("pipelineErrorMsg");
-
-    // Results Elements
-    const resultsCard = document.getElementById("resultsCard");
-    const resultsSubtitle = document.getElementById("resultsSubtitle");
-    const downloadZipBtn = document.getElementById("downloadZipBtn");
-    const generatedFileList = document.getElementById("generatedFileList");
-    const codeViewer = document.getElementById("codeViewer");
-    const activeFilename = document.getElementById("activeFilename");
-    const copyCodeBtn = document.getElementById("copyCodeBtn");
-
-    // Tab Navigation
-    const navItems = document.querySelectorAll(".nav-item");
-    const tabPanes = document.querySelectorAll(".tab-pane");
-    const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
-    const historyTableBody = document.getElementById("historyTableBody");
-
-    // -------------------------------------------------------------
-    // 1. Initialize & Check Backend Health
-    // -------------------------------------------------------------
-    async function initApp() {
-        try {
-            const healthRes = await fetch("/api/health");
-            if (healthRes.ok) {
-                const health = await healthRes.json();
-                backendStatusDot.className = "status-indicator online";
-                backendStatusText.textContent = "API Online (Isolated Storage)";
-            } else {
-                throw new Error("Backend offline");
-            }
-        } catch (e) {
-            backendStatusDot.className = "status-indicator offline";
-            backendStatusText.textContent = "Backend Disconnected";
-        }
-
-        // Fetch Target Profiles
-        try {
-            const profRes = await fetch("/api/profiles");
-            if (profRes.ok) {
-                targetProfiles = await profRes.json();
-                targetStackSelect.innerHTML = targetProfiles.map(p => 
-                    `<option value="${p.id}">${p.name}</option>`
-                ).join("");
-                updateProfileHint();
-            }
-        } catch (e) {
-            console.error("Could not fetch target profiles:", e);
-        }
-    }
-
-    function updateProfileHint() {
-        const selected = targetProfiles.find(p => p.id === targetStackSelect.value);
-        if (selected) {
-            targetStackHint.textContent = `${selected.backend} | ${selected.database_layer}`;
-        }
-    }
-
-    targetStackSelect.addEventListener("change", updateProfileHint);
-
-    // -------------------------------------------------------------
-    // 2. Tab Switching
-    // -------------------------------------------------------------
-    navItems.forEach(item => {
-        item.addEventListener("click", () => {
-            navItems.forEach(n => n.classList.remove("active"));
-            tabPanes.forEach(p => p.classList.remove("active"));
-
-            item.classList.add("active");
-            const targetId = item.getAttribute("data-tab") + "Tab";
-            const targetPane = document.getElementById(targetId);
-            if (targetPane) targetPane.classList.add("active");
-
-            if (item.getAttribute("data-tab") === "history") {
-                loadJobHistory();
-            }
-        });
-    });
-
-    // -------------------------------------------------------------
-    // 3. File Selection & Drag-and-Drop
-    // -------------------------------------------------------------
-    dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("dragover");
-    });
-
-    dropZone.addEventListener("dragleave", () => {
-        dropZone.classList.remove("dragover");
-    });
-
-    dropZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropZone.classList.remove("dragover");
-        if (e.dataTransfer.files.length > 0) {
-            handleFiles(e.dataTransfer.files);
-        }
-    });
-
-    fileInput.addEventListener("change", (e) => {
-        if (e.target.files.length > 0) handleFiles(e.target.files);
-    });
-
-    folderInput.addEventListener("change", (e) => {
-        if (e.target.files.length > 0) handleFiles(e.target.files);
-    });
-
-    function handleFiles(files) {
-        selectedFiles = Array.from(files);
-        fileCountText.textContent = `${selectedFiles.length} file(s) selected`;
-        fileSummary.style.display = "flex";
-        startModernizationBtn.disabled = selectedFiles.length === 0;
-    }
-
-    clearFilesBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        selectedFiles = [];
-        fileInput.value = "";
-        folderInput.value = "";
-        fileSummary.style.display = "none";
-        startModernizationBtn.disabled = true;
-    });
-
-    // -------------------------------------------------------------
-    // 4. Start Modernization
-    // -------------------------------------------------------------
-    startModernizationBtn.addEventListener("click", async () => {
-        if (selectedFiles.length === 0) return;
-
-        startModernizationBtn.disabled = true;
-        pipelineErrorAlert.style.display = "none";
-        resultsCard.style.display = "none";
-
-        updateStepper(1, "IN_PROGRESS");
-        setProgress(15);
-
-        const formData = new FormData();
-        formData.append("project_name", projectNameInput.value.trim() || "legacy_project");
-        formData.append("target_stack", targetStackSelect.value);
-
-        selectedFiles.forEach(file => {
-            // Use webkitRelativePath if folder upload, else file.name
-            const path = file.webkitRelativePath || file.name;
-            formData.append("files", file, path);
-        });
-
-        // Stage progress animation timer while waiting for AI pipeline
-        let currentStep = 1;
-        const stageInterval = setInterval(() => {
-            if (currentStep < 4) {
-                currentStep++;
-                updateStepper(currentStep, "IN_PROGRESS");
-                setProgress(currentStep * 20);
-            }
-        }, 5000);
-
-        try {
-            const response = await fetch("/api/upload", {
-                method: "POST",
-                body: formData
-            });
-
-            clearInterval(stageInterval);
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({ detail: "Modernization failed." }));
-                throw new Error(errData.detail || "Server error occurred during modernization.");
-            }
-
-            const result = await response.json();
-            currentJobId = result.job_id;
-
-            // Mark complete
-            updateStepper(5, "COMPLETED");
-            setProgress(100);
-
-            // Fetch job file list and display
-            await loadJobResults(currentJobId);
-
-        } catch (err) {
-            clearInterval(stageInterval);
-            updateStepper(currentStep, "FAILED");
-            pipelineErrorAlert.style.display = "block";
-            pipelineErrorMsg.textContent = err.message;
-        } finally {
-            startModernizationBtn.disabled = false;
-        }
-    });
-
-    function setProgress(percent) {
-        progressFill.style.width = `${percent}%`;
-        progressLabel.textContent = `${percent}%`;
-    }
-
-    function updateStepper(activeStepIndex, status) {
-        for (let i = 1; i <= 5; i++) {
-            const stepEl = document.getElementById(`step${i}`);
-            stepEl.classList.remove("active", "completed");
-            if (i < activeStepIndex) {
-                stepEl.classList.add("completed");
-            } else if (i === activeStepIndex) {
-                stepEl.classList.add("active");
-                if (status === "COMPLETED") stepEl.classList.add("completed");
-            }
-        }
-
-        jobStatusBadge.className = `badge badge-${status.toLowerCase()}`;
-        jobStatusBadge.textContent = status;
-    }
-
-    // -------------------------------------------------------------
-    // 5. Load Results & Interactive Code Preview
-    // -------------------------------------------------------------
-    async function loadJobResults(jobId) {
-        resultsCard.style.display = "block";
-        resultsSubtitle.textContent = `Job Workspace ID: ${jobId} (Isolated in %LOCALAPPDATA%)`;
-        downloadZipBtn.href = `/api/jobs/${jobId}/download`;
-
-        try {
-            const filesRes = await fetch(`/api/jobs/${jobId}/files`);
-            if (!filesRes.ok) throw new Error("Could not fetch generated files.");
-            const data = await filesRes.json();
-
-            generatedFileList.innerHTML = data.files.map(fname => `
-                <li class="file-item" data-filename="${fname}">
-                    ${getFileIcon(fname)} ${fname}
-                </li>
-            `).join("");
-
-            // Setup click handlers for files
-            const items = generatedFileList.querySelectorAll(".file-item");
-            items.forEach(item => {
-                item.addEventListener("click", () => {
-                    items.forEach(i => i.classList.remove("active"));
-                    item.classList.add("active");
-                    previewFileContent(jobId, item.getAttribute("data-filename"));
+        async initApp() {
+            await this.checkHealth();
+            await this.loadProfiles();
+            this.refreshIcons();
+            this.$watch('activeTab', () => this.refreshIcons());
+            this.$watch('jobStatus', () => this.refreshIcons());
+            this.$watch('activeFile', () => {
+                this.$nextTick(() => {
+                    if (window.Prism) Prism.highlightAll();
+                    this.refreshIcons();
                 });
             });
+        },
 
-            // Auto-preview first file
-            if (items.length > 0) {
-                items[0].click();
+        refreshIcons() {
+            this.$nextTick(() => {
+                if (window.lucide) {
+                    lucide.createIcons();
+                }
+            });
+        },
+
+        async checkHealth() {
+            try {
+                const res = await fetch('/api/health');
+                this.backendOnline = res.ok;
+            } catch (e) {
+                this.backendOnline = false;
             }
+        },
 
-        } catch (e) {
-            console.error("Could not load job files:", e);
-        }
-    }
+        async loadProfiles() {
+            try {
+                const res = await fetch('/api/profiles');
+                if (res.ok) {
+                    this.profiles = await res.json();
+                    if (this.profiles.length > 0) {
+                        this.selectedProfile = this.profiles[0].id;
+                        this.updateProfileDetails();
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load profiles:', e);
+            }
+        },
 
-    async function previewFileContent(jobId, filename) {
-        activeFilename.textContent = filename;
-        codeViewer.textContent = "Loading file content...";
-        try {
-            const res = await fetch(`/api/jobs/${jobId}/file-content?filename=${encodeURIComponent(filename)}`);
-            if (res.ok) {
+        updateProfileDetails() {
+            const p = this.profiles.find(x => x.id === this.selectedProfile);
+            if (p) {
+                this.profileDescription = `${p.backend} • ${p.database_layer}`;
+            }
+        },
+
+        handleDrop(e) {
+            this.isDragging = false;
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+                this.addFiles(e.dataTransfer.files);
+            }
+        },
+
+        handleFileSelect(e) {
+            if (e.target.files && e.target.files.length > 0) {
+                this.addFiles(e.target.files);
+            }
+        },
+
+        addFiles(fileList) {
+            const arr = Array.from(fileList);
+            this.files = this.files.concat(arr);
+            this.errorMessage = '';
+            this.refreshIcons();
+        },
+
+        clearFiles() {
+            this.files = [];
+            this.errorMessage = '';
+            this.refreshIcons();
+        },
+
+        formatSize(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        },
+
+        formatDate(isoStr) {
+            if (!isoStr) return '-';
+            try {
+                const d = new Date(isoStr);
+                return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return isoStr;
+            }
+        },
+
+        getLanguageClass(filename) {
+            if (!filename) return 'python';
+            const lower = filename.toLowerCase();
+            if (lower.endsWith('.py')) return 'python';
+            if (lower.endsWith('.sql')) return 'sql';
+            if (lower.endsWith('.json')) return 'json';
+            if (lower.endsWith('.java')) return 'java';
+            if (lower.endsWith('.md')) return 'markdown';
+            if (lower.endsWith('.html')) return 'markup';
+            if (lower.endsWith('.css')) return 'css';
+            if (lower.endsWith('.js')) return 'javascript';
+            return 'python';
+        },
+
+        async loadDemoProject() {
+            this.projectName = 'Legacy_Java_FullStack';
+            this.selectedProfile = 'fastapi-sqlalchemy';
+            this.updateProfileDetails();
+
+            const sampleFiles = [
+                new File(['package com.legacy.model;\npublic class User { private int id; private String name; }'], 'src/com/legacy/model/User.java', { type: 'text/plain' }),
+                new File(['package com.legacy.dao;\nimport java.sql.*;\npublic class UserDAO { public void find() {} }'], 'src/com/legacy/dao/UserDAO.java', { type: 'text/plain' }),
+                new File(['CREATE TABLE users (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100), email VARCHAR(150));'], 'schema.sql', { type: 'text/plain' }),
+                new File(['db.url=jdbc:mysql://localhost:3306/company_db\ndb.user=root\ndb.password=secret'], 'application.properties', { type: 'text/plain' }),
+                new File(['<html><body><h1>Legacy User Dashboard</h1></body></html>'], 'frontend/index.html', { type: 'text/html' }),
+                new File(['console.log("legacy frontend active");'], 'frontend/app.js', { type: 'text/javascript' })
+            ];
+
+            this.files = sampleFiles;
+            this.errorMessage = '';
+            this.refreshIcons();
+        },
+
+        async startModernization() {
+            if (this.files.length === 0 || this.isProcessing) return;
+
+            this.isProcessing = true;
+            this.jobStatus = 'IN_PROGRESS';
+            this.jobStatusText = 'Modernizing...';
+            this.currentStep = 1;
+            this.progressPercent = 15;
+            this.stageStatusDetail = 'Ingesting source files into isolated %LOCALAPPDATA% workspace...';
+            this.errorMessage = '';
+            this.generatedFiles = [];
+            this.activeFile = null;
+            this.activeFileContent = '';
+
+            const formData = new FormData();
+            formData.append('project_name', this.projectName || 'Legacy_Project');
+            formData.append('target_stack', this.selectedProfile);
+
+            this.files.forEach(f => {
+                const path = f.webkitRelativePath || f.name;
+                formData.append('files', f, path);
+            });
+
+            let step = 1;
+            const stageTexts = [
+                'Ingesting source files into isolated %LOCALAPPDATA% workspace...',
+                'Agent 1: Extracting business rules, entities & database constraints...',
+                'Agent 2: Synthesizing Behavioral Specification Graph (BSG)...',
+                'Agent 3: Generating target architecture files & running AST guardrails...',
+                'Agent 4: Verifying equivalence & building export package...'
+            ];
+
+            this.stageTimer = setInterval(() => {
+                if (step < 4) {
+                    step++;
+                    this.currentStep = step;
+                    this.progressPercent = step * 20;
+                    this.stageStatusDetail = stageTexts[step - 1];
+                    this.refreshIcons();
+                }
+            }, 6000);
+
+            try {
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                clearInterval(this.stageTimer);
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: 'Modernization request failed.' }));
+                    throw new Error(err.detail || 'Server error occurred during modernization.');
+                }
+
                 const data = await res.json();
-                codeViewer.textContent = data.content;
-            } else {
-                codeViewer.textContent = "// Could not load file content.";
+                this.currentJobId = data.job_id;
+                this.currentStep = 5;
+                this.progressPercent = 100;
+                this.jobStatus = 'COMPLETED';
+                this.jobStatusText = 'Completed (100%)';
+                this.stageStatusDetail = 'All files synthesized, guardrails passed, and ZIP packaged!';
+
+                await this.loadJobFiles(this.currentJobId);
+
+            } catch (e) {
+                clearInterval(this.stageTimer);
+                this.jobStatus = 'FAILED';
+                this.jobStatusText = 'Failed';
+                this.errorMessage = e.message || 'Pipeline execution failed.';
+                this.stageStatusDetail = 'Modernization pipeline encountered an error.';
+            } finally {
+                this.isProcessing = false;
+                this.refreshIcons();
             }
-        } catch (e) {
-            codeViewer.textContent = `// Error reading file: ${e.message}`;
-        }
-    }
+        },
 
-    function getFileIcon(filename) {
-        if (filename.endsWith(".py")) return "🐍";
-        if (filename.endsWith(".java")) return "☕";
-        if (filename.endsWith(".sql")) return "🗄️";
-        if (filename.endsWith(".json")) return "📋";
-        if (filename.endsWith(".md")) return "📝";
-        if (filename.endsWith(".bat")) return "⚙️";
-        return "📄";
-    }
-
-    copyCodeBtn.addEventListener("click", () => {
-        navigator.clipboard.writeText(codeViewer.textContent).then(() => {
-            copyCodeBtn.textContent = "Copied!";
-            setTimeout(() => { copyCodeBtn.textContent = "Copy"; }, 2000);
-        });
-    });
-
-    // -------------------------------------------------------------
-    // 6. Job History Tab
-    // -------------------------------------------------------------
-    async function loadJobHistory() {
-        historyTableBody.innerHTML = `<tr><td colspan="7" class="text-center">Loading history...</td></tr>`;
-        try {
-            const res = await fetch("/api/jobs");
-            if (!res.ok) throw new Error("Could not load jobs.");
-            const jobs = await res.json();
-
-            if (jobs.length === 0) {
-                historyTableBody.innerHTML = `<tr><td colspan="7" class="text-center">No jobs found. Modernize a project to see runs here.</td></tr>`;
-                return;
+        async loadJobFiles(jobId) {
+            try {
+                const res = await fetch(`/api/jobs/${jobId}/files`);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.generatedFiles = data.files || [];
+                    if (this.generatedFiles.length > 0) {
+                        const defaultFile = this.generatedFiles.find(f => f.includes('main.py') || f.includes('MODERNIZATION_REPORT.md')) || this.generatedFiles[0];
+                        await this.selectFile(defaultFile);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load job files:', e);
             }
+        },
 
-            historyTableBody.innerHTML = jobs.map(j => `
-                <tr>
-                    <td><code>${j.job_id}</code></td>
-                    <td><strong>${j.project_name}</strong></td>
-                    <td><span class="badge badge-idle">${j.target_stack}</span></td>
-                    <td><span class="badge badge-${j.status.toLowerCase()}">${j.status}</span></td>
-                    <td>${j.total_files}</td>
-                    <td>${new Date(j.created_at).toLocaleString()}</td>
-                    <td>
-                        ${j.status === "COMPLETED" 
-                            ? `<a href="/api/jobs/${j.job_id}/download" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">Download ZIP</a>` 
-                            : `<span class="text-secondary">-</span>`
-                        }
-                    </td>
-                </tr>
-            `).join("");
+        async selectFile(filename) {
+            this.activeFile = filename;
+            this.activeFileContent = '// Loading file content...';
+            try {
+                const res = await fetch(`/api/jobs/${this.currentJobId}/file-content?filename=${encodeURIComponent(filename)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.activeFileContent = data.content || '';
+                } else {
+                    this.activeFileContent = '// Unable to read file content.';
+                }
+            } catch (e) {
+                this.activeFileContent = '// Error reading file from server.';
+            }
+            this.$nextTick(() => {
+                if (window.Prism) Prism.highlightAll();
+                this.refreshIcons();
+            });
+        },
 
-        } catch (e) {
-            historyTableBody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">Error loading history: ${e.message}</td></tr>`;
+        async copyCode() {
+            if (!this.activeFileContent) return;
+            try {
+                await navigator.clipboard.writeText(this.activeFileContent);
+                this.copied = true;
+                setTimeout(() => { this.copied = false; }, 2000);
+            } catch (e) {
+                console.error('Clipboard copy failed:', e);
+            }
+        },
+
+        async fetchJobHistory() {
+            try {
+                const res = await fetch('/api/jobs');
+                if (res.ok) {
+                    this.history = await res.json();
+                }
+            } catch (e) {
+                console.error('Failed to fetch history:', e);
+            }
+            this.refreshIcons();
         }
-    }
-
-    refreshHistoryBtn.addEventListener("click", loadJobHistory);
-
-    // Initial run
-    initApp();
-});
+    };
+}
