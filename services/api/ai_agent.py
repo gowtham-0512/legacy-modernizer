@@ -302,11 +302,19 @@ def generate_modernization_report(
     except Exception:
         bsg = {}
 
-    meta = inv.get("project_metadata", {})
-    rules = inv.get("business_rule_inventory", [])
-    configs = inv.get("configurations", [])
-    invariants = bsg.get("global_invariants", [])
-    operations = bsg.get("operation_nodes", [])
+    meta = inv.get("project_metadata", {}) if isinstance(inv, dict) else {}
+    if not isinstance(meta, dict):
+        meta = {}
+    rules = inv.get("business_rule_inventory", []) if isinstance(inv, dict) else []
+    configs = inv.get("configurations", []) if isinstance(inv, dict) else []
+    invariants = bsg.get("global_invariants", []) if isinstance(bsg, dict) else []
+    operations = bsg.get("operation_nodes", []) if isinstance(bsg, dict) else []
+
+    entry_points = meta.get("entry_points", [])
+    if isinstance(entry_points, list):
+        entry_points_str = ", ".join(str(ep) for ep in entry_points) or "Application Services"
+    else:
+        entry_points_str = str(entry_points) or "Application Services"
 
     lines = [
         "# Legacy Modernization Audit Report",
@@ -323,46 +331,55 @@ def generate_modernization_report(
         "## 2. Architecture Transformation",
         f"- **Detected Legacy Framework:** `{meta.get('detected_framework', 'Legacy Full-Stack')}`",
         f"- **Detected Database:** `{meta.get('database_type', 'Relational SQL')}`",
-        f"- **Entry Points Modernized:** `{', '.join(meta.get('entry_points', [])) or 'Application Services'}`",
+        f"- **Entry Points Modernized:** `{entry_points_str}`",
         "\n"
     ]
 
-    if configs:
+    if configs and isinstance(configs, list):
         lines.append("### Detected Configurations Preserved:")
         for c in configs:
-            lines.append(f"- `{c.get('key', '')}` = `{c.get('value', '')}`")
+            if isinstance(c, dict):
+                lines.append(f"- `{c.get('key', '')}` = `{c.get('value', '')}`")
+            else:
+                lines.append(f"- `{c}`")
         lines.append("\n")
 
     lines.append("## 3. Preserved Business Rules Inventory (Agent 1)")
-    if rules:
+    if rules and isinstance(rules, list):
         lines.append("| Rule ID | Type | Source File | Description | Confidence |")
         lines.append("| :--- | :--- | :--- | :--- | :--- |")
         for r in rules:
-            lines.append(f"| **{r.get('id', 'BR')}** | `{r.get('rule_type', 'explicit')}` | `{r.get('source_file', 'Source')}` | {r.get('description', '')} | `{r.get('confidence', 'high')}` |")
+            if isinstance(r, dict):
+                lines.append(f"| **{r.get('id', 'BR')}** | `{r.get('rule_type', 'explicit')}` | `{r.get('source_file', 'Source')}` | {r.get('description', '')} | `{r.get('confidence', 'high')}` |")
+            else:
+                lines.append(f"| **BR** | `inferred` | `Source` | {r} | `medium` |")
     else:
         lines.append("*All core entities and control flows extracted directly from source artifacts.*")
     lines.append("\n")
 
-    if invariants:
+    if invariants and isinstance(invariants, list):
         lines.append("## 4. Behavioral Specification Graph Contracts (Agent 2)")
         lines.append("### Global System Invariants:")
         for invar in invariants:
             lines.append(f"- {invar}")
         lines.append("\n")
 
-    if operations:
+    if operations and isinstance(operations, list):
         lines.append("### Modernized Operation Contracts:")
         for op in operations:
-            lines.append(f"#### Operation: `{op.get('operation', 'Endpoint')}` (Target: `{op.get('target_file', 'endpoint')}`)")
-            if op.get("preconditions"):
-                lines.append("**Preconditions:**")
-                for pre in op.get("preconditions", []):
-                    lines.append(f"  - `{pre}`")
-            if op.get("postconditions"):
-                lines.append("**Postconditions:**")
-                for post in op.get("postconditions", []):
-                    lines.append(f"  - `{post}`")
-            lines.append("\n")
+            if isinstance(op, dict):
+                lines.append(f"#### Operation: `{op.get('operation', 'Endpoint')}` (Target: `{op.get('target_file', 'endpoint')}`)")
+                if op.get("preconditions") and isinstance(op.get("preconditions"), list):
+                    lines.append("**Preconditions:**")
+                    for pre in op.get("preconditions", []):
+                        lines.append(f"  - `{pre}`")
+                if op.get("postconditions") and isinstance(op.get("postconditions"), list):
+                    lines.append("**Postconditions:**")
+                    for post in op.get("postconditions", []):
+                        lines.append(f"  - `{post}`")
+                lines.append("\n")
+            else:
+                lines.append(f"- `{op}`\n")
 
     lines.append("## 5. Generated Project Files")
     for f in generated_files:
