@@ -182,6 +182,7 @@ def agent3_modernization_transformer(project_bundle_text: str, bsg_json: str, pr
             "- NEVER hardcode raw secrets, passwords, or API keys. Put placeholders in .env.example.\n"
             "- NEVER generate DROP DATABASE or unconditional DROP TABLE statements.\n"
             "- In 'database.py': ALWAYS use 'from urllib.parse import quote_plus' to encode database passwords.\n"
+            "- In 'main.py': implement a robust health check: `@app.get('/api/health')` using `from sqlalchemy import text; db.execute(text('SELECT 1'))` returning status 200.\n"
             "- In 'requirements.txt': Use flexible version bounds with '>='."
         )
     else:
@@ -542,6 +543,15 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
         if frontend_src:
             target_frontend = output_dir / "frontend"
             shutil.copytree(frontend_src, target_frontend, dirs_exist_ok=True)
+            # Sanitize restrictive HTML input step attributes (e.g. min="1" step="500")
+            for hfile in target_frontend.glob("*.html"):
+                try:
+                    htext = hfile.read_text(encoding="utf-8")
+                    if 'step="500"' in htext or 'min="1" step=' in htext:
+                        htext = re.sub(r'min=["\']1["\']\s+step=["\']\d+["\']', 'min="0" step="any"', htext)
+                        hfile.write_text(htext, encoding="utf-8")
+                except Exception:
+                    pass
 
         # 6. Generate MODERNIZATION_REPORT.md
         all_output_files = list(final_files_dict.keys()) + [
