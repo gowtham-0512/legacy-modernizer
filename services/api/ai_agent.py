@@ -20,12 +20,16 @@ from .guardrails import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Supported text extensions for code and configurations
+# Supported text extensions for code, schemas, and configurations
 SUPPORTED_EXTENSIONS = (
     ".java", ".xml", ".properties", ".yaml", ".yml", 
-    ".sql", ".json", ".txt", ".gradle", ".conf", ".ini",
-    ".py", ".js", ".ts", ".html", ".css", ".jsp"
+    ".sql", ".json", ".gradle", ".conf", ".ini",
+    ".py", ".js", ".ts", ".html", ".jsp"
 )
+
+# Files and prefixes that do not contain architectural business logic or DB schemas
+IGNORED_PATTERNS = ("verify_", "test_", ".min.", ".map", "package-lock")
+IGNORED_EXTENSIONS = (".css", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".woff", ".woff2", ".map")
 
 # Folders to ignore during scanning
 IGNORED_DIRECTORIES = {
@@ -35,19 +39,29 @@ IGNORED_DIRECTORIES = {
 
 def bundle_project_files(upload_dir: str) -> dict:
     """
-    Scans the uploaded directory and reads all code and configuration files.
-    Returns a dictionary mapping relative file paths to their contents.
+    Scans the uploaded directory and reads code, schema, and configuration files.
+    Filters out static assets (CSS, images) and test scripts to conserve token budget.
     """
     project_bundle = {}
     for root, dirs, files in os.walk(upload_dir):
         dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in IGNORED_DIRECTORIES]
         for file in files:
-            if file.lower().endswith(SUPPORTED_EXTENSIONS):
+            file_lower = file.lower()
+            # Skip non-architectural assets
+            if any(file_lower.endswith(ext) for ext in IGNORED_EXTENSIONS):
+                continue
+            if any(pat in file_lower for pat in IGNORED_PATTERNS):
+                continue
+
+            if file_lower.endswith(SUPPORTED_EXTENSIONS):
                 full_path = os.path.join(root, file)
                 relative_path = os.path.relpath(full_path, upload_dir)
                 try:
                     with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                        project_bundle[relative_path] = f.read()
+                        content = f.read()
+                        # Skip oversized bundle files (> 100KB)
+                        if len(content) < 100_000:
+                            project_bundle[relative_path] = content
                 except Exception as e:
                     print(f"Skipping {relative_path} due to read error: {e}")
     return project_bundle

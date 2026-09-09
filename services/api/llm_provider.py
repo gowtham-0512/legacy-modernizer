@@ -128,6 +128,13 @@ def call_gemini(system_prompt: str, user_prompt: str) -> str:
     raise last_error or RuntimeError("All Gemini fallback models failed.")
 
 
+GROQ_TOKEN_CEILING = 6500  # Safe threshold under Groq free tier 8,000 TPM limit
+
+def estimate_tokens(text: str) -> int:
+    """Rough estimation of token count (~4 characters per token)."""
+    return len(text) // 4
+
+
 def generate_completion(
     system_instruction: str,
     user_prompt: str,
@@ -135,24 +142,35 @@ def generate_completion(
     max_retries: int = 2
 ) -> str:
     """
-    Unified entry point with dual-engine failover:
-    1. Attempts Groq (Primary provider).
-    2. Seamlessly falls back to Gemini if Groq fails or is unconfigured.
+    Unified entry point with smart token-budget routing:
+    1. If prompt > 6,500 tokens: routes directly to Gemini (1M context) to avoid Groq 413 errors.
+    2. If prompt <= 6,500 tokens: runs on Groq (Primary 300 t/s), with seamless Gemini fallback.
     """
     groq_key = os.environ.get("GROQ_API_KEY", GROQ_API_KEY)
     gemini_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
 
+    est_tokens = estimate_tokens(system_instruction + user_prompt)
     errors = []
 
-    # 1. Try Groq as Primary
-    if groq_key and groq_key != "your_groq_api_key_here":
+    # 1. Smart routing: If prompt exceeds Groq's 8,000 TPM limit, route directly to Gemini
+    if est_tokens > GROQ_TOKEN_CEILING:
+        print(f"[AI ENGINE] Prompt size (~{est_tokens} tokens) exceeds Groq limit ({GROQ_TOKEN_CEILING}). Routing directly to Gemini (1M context)...")
+        if gemini_key and gemini_key != "your_gemini_api_key_here":
+            try:
+                return call_gemini(system_instruction, user_prompt)
+            except Exception as gem_err:
+                errors.append(f"Gemini Direct Route: {gem_err}")
+                print(f"[AI ENGINE] Gemini error: {gem_err}")
+
+    # 2. Try Groq as Primary for normal-sized prompts
+    elif groq_key and groq_key != "your_groq_api_key_here":
         try:
             return call_groq(system_instruction, user_prompt, json_mode=json_mode)
         except Exception as err:
             errors.append(f"Groq: {err}")
-            print(f"[AI ENGINE] Groq failed. Switching to Gemini fallback...")
+            print(f"[AI ENGINE] Groq notice: {err}. Switching to Gemini fallback...")
 
-    # 2. Fallback to Gemini
+    # 3. Fallback to Gemini if Groq wasn't tried or failed
     if gemini_key and gemini_key != "your_gemini_api_key_here":
         try:
             return call_gemini(system_instruction, user_prompt)
