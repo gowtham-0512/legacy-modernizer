@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legacy Modernizer V2 | AI Full-Stack Modernization</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">⚡</div>
+                <div class="brand-text">
+                    <h2>Modernizer<span>.ai</span></h2>
+                    <p class="tagline">Enterprise Full-Stack Migration</p>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="modernize">
+                    <span class="icon">🚀</span> Modernize Project
+                </button>
+                <button class="nav-item" data-tab="history">
+                    <span class="icon">📜</span> Job History
+                </button>
+                <button class="nav-item" data-tab="architecture">
+                    <span class="icon">🛡️</span> Guardrails & Safety
+                </button>
+            </nav>
+
+            <div class="system-status">
+                <div class="status-indicator online" id="backendStatusDot"></div>
+                <div class="status-text">
+                    <span class="status-title">System Status</span>
+                    <span class="status-subtitle" id="backendStatusText">Checking API...</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Modernize Tab -->
+            <section id="modernizeTab" class="tab-pane active">
+                <header class="content-header">
+                    <div>
+                        <h1>Modernize Full-Stack Application</h1>
+                        <p>Upload a legacy repository to automatically transform architecture, backend, database, and APIs.</p>
+                    </div>
+                </header>
+
+                <div class="grid-2-col">
+                    <!-- Left: Upload & Config Card -->
+                    <div class="card">
+                        <h3 class="card-title">1. Project Configuration</h3>
+
+                        <div class="form-group">
+                            <label for="projectName">Project Name</label>
+                            <input type="text" id="projectName" class="form-control" value="Legacy_Enterprise_App" placeholder="e.g. Legacy_CRM">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="targetStackSelect">Target Modern Architecture</label>
+                            <select id="targetStackSelect" class="form-control">
+                                <option value="fastapi-sqlalchemy">Loading target profiles...</option>
+                            </select>
+                            <p class="field-hint" id="targetStackHint">Select the target destination framework.</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Source Code Upload</label>
+                            <div class="drop-zone" id="dropZone">
+                                <div class="drop-icon">📁</div>
+                                <h4>Drag & Drop legacy files or folder</h4>
+                                <p>Supports .java, .sql, .jsp, .py, .xml, .properties, .js, .html</p>
+                                <div class="file-buttons">
+                                    <label class="btn btn-secondary">
+                                        Choose Files
+                                        <input type="file" id="fileInput" multiple style="display: none;">
+                                    </label>
+                                    <label class="btn btn-secondary">
+                                        Choose Folder
+                                        <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
+                                    </label>
+                                </div>
+                                <div class="file-summary" id="fileSummary" style="display: none;">
+                                    <span id="fileCountText">0 files selected</span>
+                                    <button class="btn-text text-danger" id="clearFilesBtn">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button id="startModernizationBtn" class="btn btn-primary btn-block" disabled>
+                            🚀 Start AI Modernization
+                        </button>
+                    </div>
+
+                    <!-- Right: Live Pipeline Status -->
+                    <div class="card">
+                        <div class="card-header-flex">
+                            <h3 class="card-title">2. Live Pipeline Progress</h3>
+                            <span class="badge badge-idle" id="jobStatusBadge">Idle</span>
+                        </div>
+
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+                            </div>
+                            <span class="progress-label" id="progressLabel">0%</span>
+                        </div>
+
+                        <!-- Stepper Stages -->
+                        <div class="stepper">
+                            <div class="step" id="step1">
+                                <div class="step-num">1</div>
+                                <div class="step-content">
+                                    <h4>Project Ingestion & Isolation</h4>
+                                    <p>Provisioning workspace in %LOCALAPPDATA%</p>
+                                </div>
+                            </div>
+                            <div class="step" id="step2">
+                                <div class="step-num">2</div>
+                                <div class="step-content">
+                                    <h4>Legacy Architecture Analysis (Agent 1)</h4>
+                                    <p>Extracting business rules & schema contracts</p>
+                                </div>
+                            </div>
+                            <div class="step" id="step3">
+                                <div class="step-num">3</div>
+                                <div class="step-content">
+                                    <h4>Specification Graph (Agent 2)</h4>
+                                    <p>Designing target architecture & invariants</p>
+                                </div>
+                            </div>
+                            <div class="step" id="step4">
+                                <div class="step-num">4</div>
+                                <div class="step-content">
+                                    <h4>Code Transformation & Guardrails (Agent 3)</h4>
+                                    <p>AST validation, secret scan & SQL safety</p>
+                                </div>
+                            </div>
+                            <div class="step" id="step5">
+                                <div class="step-num">5</div>
+                                <div class="step-content">
+                                    <h4>Equivalence Verification & Packaging</h4>
+                                    <p>Automated tests, report & ZIP export</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-danger" id="pipelineErrorAlert" style="display: none;">
+                            <strong>Error:</strong> <span id="pipelineErrorMsg">Pipeline execution failed.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results & Code Preview Area (Appears on Completion) -->
+                <div class="card mt-4" id="resultsCard" style="display: none;">
+                    <div class="card-header-flex">
+                        <div>
+                            <h3 class="card-title">Modernized Project Artifacts</h3>
+                            <p class="subtitle" id="resultsSubtitle">Job ID: -</p>
+                        </div>
+                        <a id="downloadZipBtn" href="#" class="btn btn-success">
+                            📦 Download Modernized Project (.zip)
+                        </a>
+                    </div>
+
+                    <div class="code-viewer-layout">
+                        <!-- File Tree -->
+                        <div class="file-sidebar">
+                            <h4>Generated Files</h4>
+                            <ul class="file-list" id="generatedFileList">
+                                <!-- Populated dynamically -->
+                            </ul>
+                        </div>
+
+                        <!-- Code Content Preview -->
+                        <div class="code-display">
+                            <div class="code-header">
+                                <span class="active-filename" id="activeFilename">Select a file to preview</span>
+                                <button class="btn-copy" id="copyCodeBtn">Copy</button>
+                            </div>
+                            <pre><code id="codeViewer">// Modernized code preview will appear here...</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- History Tab -->
+            <section id="historyTab" class="tab-pane">
+                <header class="content-header">
+                    <div>
+                        <h1>Job Execution History</h1>
+                        <p>Review past modernization runs stored in local SQLite metadata.</p>
+                    </div>
+                    <button class="btn btn-secondary" id="refreshHistoryBtn">🔄 Refresh</button>
+                </header>
+
+                <div class="card">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Project Name</th>
+                                <th>Target Stack</th>
+                                <th>Status</th>
+                                <th>Files</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr><td colspan="7" class="text-center">Loading history...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Architecture & Guardrails Tab -->
+            <section id="architectureTab" class="tab-pane">
+                <header class="content-header">
+                    <div>
+                        <h1>Multi-Agent Architecture & Guardrails</h1>
+                        <p>How the Legacy Modernizer eliminates hallucinations and secures database operations.</p>
+                    </div>
+                </header>
+
+                <div class="grid-3-col">
+                    <div class="feature-card">
+                        <div class="feature-icon">🛡️</div>
+                        <h3>Zero-Cost AST Syntax Guardrail</h3>
+                        <p>Every generated Python file is parsed into a local Abstract Syntax Tree (AST) before saving. Catches 100% of syntax errors in 5 milliseconds with 0 API cost.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🔒</div>
+                        <h3>Read-Only Source Guarantee</h3>
+                        <p>Source databases are strictly read-only. Unchecked DROP TABLE, DROP DATABASE, and TRUNCATE queries are statically linted and blocked.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">⚡</div>
+                        <h3>Dual AI Orchestration</h3>
+                        <p>Powered by Groq's high-speed Llama-3.3-70B model with automatic failover to Google Gemini Flash when quotas or network drops occur.</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
