@@ -223,11 +223,20 @@ def agent3_modernization_transformer(project_bundle_text: str, bsg_json: str, pr
         json_mode=True
     )
     parsed = clean_and_parse_json(raw_response)
+    raw_files = {}
     if isinstance(parsed, dict) and "files" in parsed and isinstance(parsed["files"], dict):
-        return parsed["files"]
+        raw_files = parsed["files"]
     elif isinstance(parsed, dict):
-        return parsed
-    return {"main.py": str(raw_response)}
+        raw_files = parsed
+    else:
+        raw_files = {"main.py": str(raw_response)}
+
+    # Filter out junk tokens or sub-keys that aren't valid filenames (must have extension or slash)
+    valid_files = {}
+    for k, v in raw_files.items():
+        if isinstance(k, str) and ("." in k or "/" in k or "\\" in k) and isinstance(v, str):
+            valid_files[k] = v
+    return valid_files or raw_files
 
 
 def agent4_equivalence_validator(files_dict: dict, bsg_json: str, profile: dict) -> str:
@@ -498,6 +507,9 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
                 break
         else:
             print("Max iterations reached. Preserving best-effort generated project.")
+            if final_files_dict:
+                written_files = unpack_project_files(final_files_dict, output_dir)
+                print(f"Unpacked {len(written_files)} best-effort files: {written_files}")
 
         # 5. Preserve and Mount Frontend Assets if present in upload
         frontend_src = None

@@ -124,14 +124,21 @@ def call_groq(system_prompt: str, user_prompt: str, json_mode: bool = True) -> s
     raise last_error or RuntimeError("All Groq models failed.")
 
 
-def call_gemini(system_prompt: str, user_prompt: str, retries_per_model: int = 2) -> str:
-    """Invokes the Google Gemini API with automatic model failover and network retry backoff."""
+def call_gemini(system_prompt: str, user_prompt: str, json_mode: bool = True, retries_per_model: int = 2) -> str:
+    """Invokes the Google Gemini API with structured JSON config, automatic model failover, and retry backoff."""
     api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
     if not api_key or api_key == "your_gemini_api_key_here":
         raise ValueError("GEMINI_API_KEY not configured or is placeholder.")
 
     from google import genai
+    from google.genai import types
     client = genai.Client(api_key=api_key)
+
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json" if json_mode else None,
+        max_output_tokens=8192,
+        temperature=0.2
+    )
 
     last_error = None
     for model_name in DEFAULT_GEMINI_MODELS:
@@ -140,7 +147,8 @@ def call_gemini(system_prompt: str, user_prompt: str, retries_per_model: int = 2
                 print(f"[AI ENGINE] Calling Gemini ({model_name}) [Attempt {attempt + 1}]...")
                 response = client.models.generate_content(
                     model=model_name,
-                    contents=[system_prompt, user_prompt]
+                    contents=[system_prompt, user_prompt],
+                    config=config
                 )
                 return response.text
             except Exception as e:
@@ -184,7 +192,7 @@ def generate_completion(
         print(f"[AI ENGINE] Prompt size (~{est_tokens} tokens) exceeds Groq limit ({GROQ_TOKEN_CEILING}). Routing directly to Gemini (1M context)...")
         if gemini_key and gemini_key != "your_gemini_api_key_here":
             try:
-                return call_gemini(system_instruction, user_prompt)
+                return call_gemini(system_instruction, user_prompt, json_mode=json_mode)
             except Exception as gem_err:
                 errors.append(f"Gemini Direct Route: {gem_err}")
                 print(f"[AI ENGINE] Gemini error: {gem_err}")
@@ -200,7 +208,7 @@ def generate_completion(
     # 3. Fallback to Gemini if Groq wasn't tried or failed
     if gemini_key and gemini_key != "your_gemini_api_key_here":
         try:
-            return call_gemini(system_instruction, user_prompt)
+            return call_gemini(system_instruction, user_prompt, json_mode=json_mode)
         except Exception as gem_err:
             errors.append(f"Gemini: {gem_err}")
             print(f"[AI ENGINE] Gemini fallback error: {gem_err}")
