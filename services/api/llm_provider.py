@@ -30,7 +30,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # Default recommended free-tier models
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 BACKUP_GROQ_MODEL = "llama-3.1-8b-instant"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODELS = ["gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-2.5-flash"]
 
 def clean_and_parse_json(raw_text: str) -> Union[Dict[str, Any], list]:
     """
@@ -95,8 +95,8 @@ def call_groq(system_prompt: str, user_prompt: str, json_mode: bool = True, mode
     return response.choices[0].message.content
 
 
-def call_gemini(system_prompt: str, user_prompt: str, model: str = DEFAULT_GEMINI_MODEL) -> str:
-    """Invokes the Google Gemini API using google-genai SDK."""
+def call_gemini(system_prompt: str, user_prompt: str) -> str:
+    """Invokes the Google Gemini API with automatic model failover."""
     api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
     if not api_key or api_key == "your_gemini_api_key_here":
         raise ValueError("GEMINI_API_KEY not configured or is placeholder.")
@@ -104,11 +104,20 @@ def call_gemini(system_prompt: str, user_prompt: str, model: str = DEFAULT_GEMIN
     from google import genai
     client = genai.Client(api_key=api_key)
 
-    response = client.models.generate_content(
-        model=model,
-        contents=[system_prompt, user_prompt]
-    )
-    return response.text
+    last_error = None
+    for model_name in DEFAULT_GEMINI_MODELS:
+        try:
+            print(f"[AI ENGINE] Calling Gemini ({model_name})...")
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[system_prompt, user_prompt]
+            )
+            return response.text
+        except Exception as e:
+            last_error = e
+            print(f"[AI ENGINE] Gemini model {model_name} failed: {e}. Trying next fallback...")
+
+    raise last_error or RuntimeError("All Gemini fallback models failed.")
 
 
 def generate_completion(
@@ -153,9 +162,9 @@ def generate_completion(
 
     # 2. Fallback to Gemini
     if gemini_key and gemini_key != "your_gemini_api_key_here":
-        print(f"[AI ENGINE] Falling back to Gemini ({DEFAULT_GEMINI_MODEL})...")
+        print("[AI ENGINE] Invoking Gemini fallback...")
         try:
-            return call_gemini(system_instruction, user_prompt, model=DEFAULT_GEMINI_MODEL)
+            return call_gemini(system_instruction, user_prompt)
         except Exception as gem_err:
             errors.append(f"Gemini: {gem_err}")
             print(f"[AI ENGINE] Gemini fallback error: {gem_err}")
