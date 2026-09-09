@@ -29,12 +29,12 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 # Default recommended models with failover
 DEFAULT_GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "llama-3.3-70b-versatile"]
-DEFAULT_GEMINI_MODELS = ["gemini-3.6-flash", "gemini-flash-lite-latest", "gemini-2.5-flash"]
+DEFAULT_GEMINI_MODELS = ["gemini-3.6-flash", "gemini-flash-lite-latest"]
 
 def clean_and_parse_json(raw_text: str) -> Union[Dict[str, Any], list]:
     """
     Safely extracts and parses JSON from raw LLM responses.
-    Handles markdown code blocks (```json ... ```), trailing text, and unescaped characters.
+    Handles markdown code blocks, trailing text, unescaped quotes, and truncated code strings using json_repair.
     """
     text = raw_text.strip()
     # Strip markdown block wrappers
@@ -46,17 +46,33 @@ def clean_and_parse_json(raw_text: str) -> Union[Dict[str, Any], list]:
         text = text[:-3]
     text = text.strip()
 
-    # 1. Direct parse attempt
+    # 1. Direct standard parse attempt
     try:
         return json.loads(text, strict=False)
     except Exception:
         pass
 
-    # 2. Extract first matching outer JSON object or array with regex
+    # 2. Resilient JSON repair (heals unescaped quotes, unclosed brackets, and truncated code blocks)
+    try:
+        import json_repair
+        repaired = json_repair.loads(text)
+        if isinstance(repaired, (dict, list)) and len(repaired) > 0:
+            return repaired
+    except Exception:
+        pass
+
+    # 3. Extract first matching outer JSON object with regex
     obj_match = re.search(r"(\{[\s\S]*\})", text)
     if obj_match:
         try:
             return json.loads(obj_match.group(1), strict=False)
+        except Exception:
+            pass
+        try:
+            import json_repair
+            repaired = json_repair.loads(obj_match.group(1))
+            if isinstance(repaired, (dict, list)):
+                return repaired
         except Exception:
             pass
 
@@ -64,6 +80,11 @@ def clean_and_parse_json(raw_text: str) -> Union[Dict[str, Any], list]:
     if arr_match:
         try:
             return json.loads(arr_match.group(1), strict=False)
+        except Exception:
+            pass
+        try:
+            import json_repair
+            return json_repair.loads(arr_match.group(1))
         except Exception:
             pass
 
@@ -103,8 +124,8 @@ def call_groq(system_prompt: str, user_prompt: str, json_mode: bool = True) -> s
     raise last_error or RuntimeError("All Groq models failed.")
 
 
-def call_gemini(system_prompt: str, user_prompt: str) -> str:
-    """Invokes the Google Gemini API with automatic model failover."""
+def call_gemini(system_prompt: str, user_prompt: str, retries_per_model: int = 2) -> str:
+    """Invokes the Google Gemini API with automatic model failover and network retry backoff."""
     api_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
     if not api_key or api_key == "your_gemini_api_key_here":
         raise ValueError("GEMINI_API_KEY not configured or is placeholder.")
@@ -114,16 +135,22 @@ def call_gemini(system_prompt: str, user_prompt: str) -> str:
 
     last_error = None
     for model_name in DEFAULT_GEMINI_MODELS:
-        try:
-            print(f"[AI ENGINE] Calling Gemini ({model_name})...")
-            response = client.models.generate_content(
-                model=model_name,
-                contents=[system_prompt, user_prompt]
-            )
-            return response.text
-        except Exception as e:
-            last_error = e
-            print(f"[AI ENGINE] Gemini model {model_name} notice: {e}. Trying next model...")
+        for attempt in range(retries_per_model):
+            try:
+                print(f"[AI ENGINE] Calling Gemini ({model_name}) [Attempt {attempt + 1}]...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[system_prompt, user_prompt]
+                )
+                return response.text
+            except Exception as e:
+                last_error = e
+                err_str = str(e)
+                print(f"[AI ENGINE] Gemini {model_name} attempt {attempt + 1} error: {err_str}")
+                if "503" in err_str or "UNAVAILABLE" in err_str or "10054" in err_str or "timeout" in err_str.lower():
+                    time.sleep(3 * (attempt + 1))  # Exponential backoff on temporary server spikes
+                else:
+                    break  # Fatal error (e.g. 404), try next model
 
     raise last_error or RuntimeError("All Gemini fallback models failed.")
 
