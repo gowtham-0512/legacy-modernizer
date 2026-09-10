@@ -23,6 +23,20 @@ def validate_python_syntax(filename: str, code_content: str) -> Tuple[bool, Opti
         return False, f"AST Parsing Error in {filename}: {str(e)}"
 
 
+def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
+    """
+    Deterministically sanitizes and corrects common LLM syntax/parameter hallucinations:
+    - Replaces 'response_status=' with 'status_code=' on FastAPI route decorators.
+    """
+    sanitized = {}
+    for fname, code in files_dict.items():
+        if fname.endswith(".py"):
+            # Fix FastAPI decorator response_status -> status_code
+            code = re.sub(r"\bresponse_status\s*=", "status_code=", code)
+        sanitized[fname] = code
+    return sanitized
+
+
 def validate_all_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
     """
     Validates syntax across all generated Python files.

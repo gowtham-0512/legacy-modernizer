@@ -12,6 +12,7 @@ from .profiles import get_profile, TARGET_PROFILES
 from .guardrails import (
     validate_python_syntax,
     validate_all_python_files,
+    sanitize_python_files,
     scan_for_secret_leaks,
     lint_sql_safety,
     ProjectInventorySchema,
@@ -164,6 +165,8 @@ def unpack_project_files(files_dict: dict, output_dir: Path) -> list:
 
         target_path = output_dir / clean_path
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        if clean_path.endswith(".py"):
+            content = re.sub(r"\bresponse_status\s*=", "status_code=", content)
         with target_path.open("w", encoding="utf-8") as f:
             f.write(content.strip())
         written_files.append(clean_path)
@@ -190,6 +193,7 @@ def agent3_modernization_transformer(project_bundle_text: str, bsg_json: str, pr
             "CRITICAL GUARDRAIL RULES:\n"
             "- ALWAYS put main.py directly at the root, NOT inside app/main.py.\n"
             "- ALWAYS use synchronous SQLAlchemy: create_engine('sqlite:///./app.db') - NEVER use async engine or aiosqlite.\n"
+            "- ALWAYS use 'status_code=201' for HTTP status codes on route decorators (e.g. @app.post(..., status_code=201)). NEVER use 'response_status=201'.\n"
             "- NEVER hardcode raw secrets, passwords, or API keys. Put placeholders in .env.example.\n"
             "- NEVER generate DROP DATABASE or unconditional DROP TABLE statements.\n"
             "- In 'database.py': ALWAYS use 'from urllib.parse import quote_plus' to encode database passwords.\n"
@@ -489,6 +493,8 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
             final_files_dict = agent3_modernization_transformer(
                 bundle_text, bsg_json, profile, feedback, prefer_provider=preferred_provider
             )
+            if is_python:
+                final_files_dict = sanitize_python_files(final_files_dict)
 
             # Local Guardrail 1: AST Syntax Validation (for Python targets)
             if is_python:
@@ -572,6 +578,8 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
                 feedback=emergency_feedback,
                 prefer_provider="gemini"
             )
+            if is_python:
+                final_files_dict = sanitize_python_files(final_files_dict)
             syntax_errors = validate_all_python_files(final_files_dict) if is_python else {}
             if syntax_errors:
                 print(f"[RECOVERY WARNING] Syntax issues remaining: {syntax_errors}")
