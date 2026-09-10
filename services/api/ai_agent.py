@@ -549,7 +549,7 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
                 written_files = unpack_project_files(final_files_dict, output_dir)
                 print(f"Unpacked {len(written_files)} best-effort files: {written_files}")
 
-        # 5. Preserve and Mount Frontend Assets if present in upload
+        # 5. Frontend Handling: Preserve legacy assets or auto-synthesize modern SPA
         frontend_src = None
         for root, dirs, files in os.walk(upload_dir):
             base_name = os.path.basename(root).lower()
@@ -560,23 +560,38 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
                 frontend_src = root
                 break
 
+        target_frontend = output_dir / "frontend"
+        has_existing_html = False
         if frontend_src:
-            target_frontend = output_dir / "frontend"
+            for root, dirs, files in os.walk(frontend_src):
+                if any(f.lower().endswith(".html") for f in files):
+                    has_existing_html = True
+                    break
+
+        if frontend_src and has_existing_html:
+            # Preserved legacy frontend with HTML
             shutil.copytree(frontend_src, target_frontend, dirs_exist_ok=True)
-            # Sanitize restrictive HTML input step attributes (e.g. min="1" step="500")
-            for hfile in target_frontend.glob("*.html"):
-                try:
-                    htext = hfile.read_text(encoding="utf-8")
-                    if 'step="500"' in htext or 'min="1" step=' in htext:
-                        htext = re.sub(r'min=["\']1["\']\s+step=["\']\d+["\']', 'min="0" step="any"', htext)
-                        hfile.write_text(htext, encoding="utf-8")
-                except Exception:
-                    pass
+            from .frontend_generator import sanitize_legacy_frontend
+            cleaned = sanitize_legacy_frontend(target_frontend)
+            print(f"[FRONTEND] Preserved and sanitized {cleaned} legacy frontend files from '{frontend_src}'")
+        else:
+            # Auto-synthesize modern Tailwind + Alpine SPA
+            from .frontend_generator import extract_entity_metadata, generate_modern_spa
+            entity_meta = extract_entity_metadata(final_files_dict)
+            spa_files = generate_modern_spa(entity_meta)
+            written_spa = unpack_project_files(spa_files, output_dir)
+            print(f"[FRONTEND] Auto-synthesized modern Tailwind + Alpine SPA ({len(written_spa)} files) for entity '{entity_meta['entity_name']}'")
 
         # 6. Generate MODERNIZATION_REPORT.md
         all_output_files = list(final_files_dict.keys()) + [
             "MODERNIZATION_REPORT.md", "project_bsg.json", "project_inventory.json"
         ]
+        if target_frontend.exists():
+            for f in target_frontend.rglob("*"):
+                if f.is_file():
+                    rel = str(f.relative_to(output_dir)).replace("\\", "/")
+                    if rel not in all_output_files:
+                        all_output_files.append(rel)
         if is_python and "test_suite.py" not in all_output_files:
             all_output_files.append("test_suite.py")
 
