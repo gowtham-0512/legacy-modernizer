@@ -507,7 +507,10 @@ function entityApp() {{
     return {
         "frontend/index.html": index_html,
         "frontend/app.js": app_js,
-        "frontend/style.css": style_css
+        "frontend/style.css": style_css,
+        "static/index.html": index_html,
+        "static/app.js": app_js,
+        "static/style.css": style_css
     }
 
 

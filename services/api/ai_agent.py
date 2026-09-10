@@ -204,6 +204,8 @@ def agent3_modernization_transformer(project_bundle_text: str, bsg_json: str, pr
             "- NEVER generate DROP DATABASE or unconditional DROP TABLE statements.\n"
             "- In 'database.py': ALWAYS use 'from urllib.parse import quote_plus' to encode database passwords.\n"
             "- In 'main.py': implement a robust health check: `@app.get('/api/health')` using `from sqlalchemy import text; db.execute(text('SELECT 1'))` returning status 200.\n"
+            "- In 'main.py': Mount SPA frontend at root '/' using: `for _d in ('frontend', 'static'):\n    if os.path.exists(_d):\n        app.mount('/', StaticFiles(directory=_d, html=True), name='spa')\n        break`\n"
+            "- In 'main.py' or 'database.py': If models include catalog/reference entities (such as restaurants, foods/menus, books, courses, categories), ALWAYS include an initial auto-seeding routine that inserts 3-5 realistic domain records if count == 0, so the frontend UI is never blank.\n"
             "- In 'requirements.txt': Use flexible version bounds with '>='."
         )
     else:
@@ -272,12 +274,14 @@ def agent4_equivalence_validator(files_dict: dict, bsg_json: str, profile: dict)
     if is_python:
         system_instruction = (
             "You are 'Agent 4: Equivalence Validator'. "
-            "Write a complete Python 'pytest' test suite for the modernized FastAPI + SQLAlchemy project. "
-            "The test suite must verify the endpoints, status codes, response bodies, and constraints defined in the BSG. "
-            "RULES:\n"
-            "1. Import the FastAPI app using: from main import app\n"
-            "2. Use TestClient: from fastapi.testclient import TestClient; client = TestClient(app)\n"
-            "3. Write test functions (starting with test_) verifying every operation in the BSG.\n"
+            "Write a complete, idempotent Python 'pytest' test suite for the modernized FastAPI + SQLAlchemy project. "
+            "The test suite must verify endpoints, status codes, response bodies, and constraints defined in the BSG.\n\n"
+            "MANDATORY IDEMPOTENCY & TEST ISOLATION RULES:\n"
+            "1. Import TestClient and uuid: from fastapi.testclient import TestClient; import uuid; from main import app; client = TestClient(app)\n"
+            "2. NEVER hardcode static usernames, emails, or IDs (e.g. NEVER use 'johndoe', 'test@example.com', or 'M999').\n"
+            "3. ALWAYS generate dynamic unique test data: uid = uuid.uuid4().hex[:6]; email = f'user_{uid}@example.com'; username = f'user_{uid}'.\n"
+            "4. For uniqueness constraint tests: create an item using a dynamic unique ID/email first, then attempt to create the EXACT duplicate in the next line to assert status_code == 400.\n"
+            "5. Write clear test functions (starting with test_) verifying every operation.\n\n"
             "OUTPUT FORMAT: Return ONLY valid Python code containing the pytest functions. DO NOT include markdown formatting."
         )
     else:
@@ -575,7 +579,7 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
                 # Execute automated tests with pytest
                 print(f"Executing Agent 4 automated tests (Iteration {iteration + 1})...")
                 test_result = subprocess.run(
-                    ["python", "-m", "pytest", "test_suite.py"],
+                    [sys.executable, "-m", "pytest", "test_suite.py"],
                     capture_output=True, text=True, cwd=str(output_dir)
                 )
 

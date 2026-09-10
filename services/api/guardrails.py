@@ -89,6 +89,14 @@ def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
 
             # 4. Fix unsupported rightjoin in SQLAlchemy/SQLite
             code = re.sub(r"\.rightjoin\(", ".outerjoin(", code)
+
+            # 5. Normalize static directory mounts in main.py
+            if fname.endswith("main.py") and "StaticFiles" in code:
+                code = re.sub(
+                    r"if\s+os\.path\.exists\(['\"]static['\"]\):\s*\n\s*app\.mount\(['\"/]+['\"],\s*StaticFiles\(directory=['\"]static['\"][^\)]*\)[^\)]*\)",
+                    "for _d in ('frontend', 'static'):\n    if os.path.exists(_d):\n        app.mount('/', StaticFiles(directory=_d, html=True), name='spa')\n        break",
+                    code
+                )
         sanitized[fname] = code
 
     # 5. Ensure email-validator is present in requirements.txt if EmailStr is used
