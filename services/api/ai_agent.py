@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import json
 import time
@@ -179,13 +180,198 @@ def unpack_project_files(files_dict: dict, output_dir: Path) -> list:
     return written_files
 
 
+def _agent3_stage1_domain(project_bundle_text: str, bsg_json: str, profile: dict, feedback: str = "", prefer_provider: str = None) -> dict:
+    """Stage 1: Synchronous SQLAlchemy 2.0 database connection and ORM models."""
+    system_instruction = (
+        "You are 'Agent 3: Stage 1 (Data Domain Architect)' targeting FastAPI + SQLAlchemy 2.0.\n"
+        "Your task is to generate ONLY the core synchronous SQLAlchemy 2.0 database connection and ORM models based on the BSG schema.\n\n"
+        "FILES REQUIRED:\n"
+        "1. 'database.py':\n"
+        "   - Synchronous SQLAlchemy 2.0 engine: create_engine('sqlite:///./app.db', connect_args={'check_same_thread': False})\n"
+        "   - sessionmaker(autocommit=False, autoflush=False, bind=engine)\n"
+        "   - Base = declarative_base()\n"
+        "   - get_db() dependency yielding Session and closing in finally block.\n"
+        "   - NEVER use async engine or aiosqlite.\n"
+        "   - Use 'from urllib.parse import quote_plus' if encoding passwords.\n"
+        "2. 'models.py':\n"
+        "   - Complete SQLAlchemy 2.0 ORM models for all tables, columns, constraints, foreign keys, and relationships in the BSG.\n"
+        "   - Use standard Column, Integer, String, Float, Boolean, ForeignKey, relationship.\n"
+        "   - NEVER generate DROP DATABASE or DROP TABLE statements.\n\n"
+        "OUTPUT FORMAT: Return ONLY a raw JSON document in this format:\n"
+        "{\n"
+        "  \"files\": {\n"
+        "    \"database.py\": \"<full code>\",\n"
+        "    \"models.py\": \"<full code>\"\n"
+        "  }\n"
+        "}"
+    )
+    user_prompt = f"Behavioral Specification Graph (BSG):\n{bsg_json}\n\nProject Artifact Bundle:\n{project_bundle_text}"
+    if feedback:
+        user_prompt += f"\n\nFEEDBACK TO ADDRESS:\n{feedback}"
+    raw_response = generate_completion(
+        system_instruction=system_instruction,
+        user_prompt=user_prompt,
+        json_mode=True,
+        prefer_provider=prefer_provider
+    )
+    parsed = clean_and_parse_json(raw_response)
+    files = parsed.get("files", parsed) if isinstance(parsed, dict) else {}
+    return {k: v for k, v in files.items() if isinstance(k, str) and k.endswith(".py") and isinstance(v, str)}
+
+
+def _agent3_stage2_schemas_crud(bsg_json: str, models_code: str, profile: dict, feedback: str = "", prefer_provider: str = None) -> dict:
+    """Stage 2: Pydantic V2 schemas and SQLAlchemy 2.0 CRUD query functions."""
+    system_instruction = (
+        "You are 'Agent 3: Stage 2 (Persistence & Validation Architect)' targeting FastAPI + SQLAlchemy 2.0.\n"
+        "Generate complete Pydantic V2 schemas and SQLAlchemy 2.0 CRUD query functions directly against the verified ORM models.\n\n"
+        f"GROUND TRUTH ORM MODELS (models.py):\n{models_code}\n\n"
+        "FILES REQUIRED:\n"
+        "1. 'schemas.py':\n"
+        "   - Pydantic V2 schemas for Create, Update, and Response for each model.\n"
+        "   - MANDATORY PYDANTIC V2 RULES: Use 'from pydantic import BaseModel, ConfigDict'.\n"
+        "   - For ORM response schemas: ALWAYS use 'model_config = ConfigDict(from_attributes=True)'.\n"
+        "   - NEVER use deprecated Pydantic V1 'class Config: orm_mode = True'.\n"
+        "2. 'crud.py':\n"
+        "   - Complete, non-truncated database query functions using SQLAlchemy Session.\n"
+        "   - Functions for each entity: get_<entity>(db: Session, <entity>_id: int), get_<entities>(db: Session, skip: int = 0, limit: int = 100), create_<entity>(db: Session, <entity>: schemas.<Entity>Create), update_<entity>(db: Session, <entity>_id: int, <entity>: schemas.<Entity>Update), delete_<entity>(db: Session, <entity>_id: int).\n"
+        "   - Import models directly from models, and schemas directly from schemas.\n\n"
+        "OUTPUT FORMAT: Return ONLY a raw JSON document in this format:\n"
+        "{\n"
+        "  \"files\": {\n"
+        "    \"schemas.py\": \"<full code>\",\n"
+        "    \"crud.py\": \"<full code>\"\n"
+        "  }\n"
+        "}"
+    )
+    user_prompt = f"Behavioral Specification Graph (BSG):\n{bsg_json}"
+    if feedback:
+        user_prompt += f"\n\nFEEDBACK TO ADDRESS:\n{feedback}"
+    raw_response = generate_completion(
+        system_instruction=system_instruction,
+        user_prompt=user_prompt,
+        json_mode=True,
+        prefer_provider=prefer_provider
+    )
+    parsed = clean_and_parse_json(raw_response)
+    files = parsed.get("files", parsed) if isinstance(parsed, dict) else {}
+    return {k: v for k, v in files.items() if isinstance(k, str) and k.endswith(".py") and isinstance(v, str)}
+
+
+def _agent3_stage3_router_assembly(bsg_json: str, models_code: str, schemas_code: str, crud_code: str, profile: dict, feedback: str = "", prefer_provider: str = None) -> dict:
+    """Stage 3: FastAPI main application with modern lifespan, requirements, and environment config."""
+    system_instruction = (
+        "You are 'Agent 3: Stage 3 (Routing & Application Assembly)' targeting FastAPI + SQLAlchemy 2.0.\n"
+        "Assemble the FastAPI application at ROOT level ('main.py'), dependencies ('requirements.txt'), and config ('.env.example').\n\n"
+        f"GROUND TRUTH MODELS CONTEXT:\n{models_code[:1200]}\n\n"
+        f"GROUND TRUTH SCHEMAS CONTEXT:\n{schemas_code[:1200]}\n\n"
+        "FILES REQUIRED:\n"
+        "1. 'main.py' (FastAPI application & endpoints at ROOT level):\n"
+        "   - ALL REST API endpoints must be defined directly in 'main.py' on 'app' (e.g. @app.get('/api/...'), @app.post('/api/...')). NEVER use or import from a non-existent 'routers' package or directory.\n"
+        "   - Always invoke CRUD functions positionally (e.g. `crud.create_user(db, user)` and `crud.get_user(db, user_id)`) to avoid parameter name collisions.\n"
+        "   - CORS middleware: allow_origins=['*'], allow_credentials=True, allow_methods=['*'], allow_headers=['*']\n"
+        "   - Health check: `@app.get('/api/health')` returning {'status': 'healthy'} using `db.execute(text('SELECT 1'))` with status 200.\n"
+        "   - Complete REST API endpoints for all CRUD operations, matching schemas and crud functions.\n"
+        "   - ALWAYS use 'status_code=201' for creation endpoints. NEVER use 'response_status=201'.\n"
+        "   - DATABASE & LIFESPAN INITIALIZATION:\n"
+        "     ALWAYS execute table creation and initial seeding at module level, and reference in lifespan:\n"
+        "     ```python\n"
+        "     models.Base.metadata.create_all(bind=database.engine)\n"
+        "     def seed_initial_data():\n"
+        "         db = database.SessionLocal()\n"
+        "         try:\n"
+        "             # If catalog/reference entities exist, seed 2-4 realistic domain rows if count == 0\n"
+        "             if db.query(models.<Entity>).count() == 0:\n"
+        "                 ...\n"
+        "                 db.commit()\n"
+        "         except Exception as e:\n"
+        "             print(f'Seed notice: {e}')\n"
+        "         finally:\n"
+        "             db.close()\n"
+        "     seed_initial_data()\n\n"
+        "     from contextlib import asynccontextmanager\n"
+        "     @asynccontextmanager\n"
+        "     async def lifespan(app: FastAPI):\n"
+        "         seed_initial_data()\n"
+        "         yield\n"
+        "     app = FastAPI(title='...', version='1.0.0', lifespan=lifespan)\n"
+        "     ```\n"
+        "   - NEVER use deprecated `@app.on_event('startup')`.\n"
+        "   - Mount SPA frontend at root '/' using:\n"
+        "     ```python\n"
+        "     for _d in ('frontend', 'static'):\n"
+        "         if os.path.exists(_d):\n"
+        "             app.mount('/', StaticFiles(directory=_d, html=True), name='spa')\n"
+        "             break\n"
+        "     ```\n"
+        "2. 'requirements.txt':\n"
+        "   - fastapi>=0.110.0\n"
+        "   - uvicorn>=0.28.0\n"
+        "   - sqlalchemy>=2.0.0\n"
+        "   - pydantic>=2.6.0\n"
+        "   - python-multipart>=0.0.9\n"
+        "   - email-validator>=2.0.0 (if EmailStr is used)\n"
+        "3. '.env.example':\n"
+        "   - Safe placeholder values (e.g. DATABASE_URL=sqlite:///./app.db)\n\n"
+        "OUTPUT FORMAT: Return ONLY a raw JSON document in this format:\n"
+        "{\n"
+        "  \"files\": {\n"
+        "    \"main.py\": \"<full code>\",\n"
+        "    \"requirements.txt\": \"<full code>\",\n"
+        "    \".env.example\": \"<full code>\"\n"
+        "  }\n"
+        "}"
+    )
+    user_prompt = f"Behavioral Specification Graph (BSG):\n{bsg_json}"
+    if feedback:
+        user_prompt += f"\n\nFEEDBACK TO ADDRESS:\n{feedback}"
+    raw_response = generate_completion(
+        system_instruction=system_instruction,
+        user_prompt=user_prompt,
+        json_mode=True,
+        prefer_provider=prefer_provider
+    )
+    parsed = clean_and_parse_json(raw_response)
+    files = parsed.get("files", parsed) if isinstance(parsed, dict) else {}
+    return {k: v for k, v in files.items() if isinstance(k, str) and ("." in k) and isinstance(v, str)}
+
+
 def agent3_modernization_transformer(project_bundle_text: str, bsg_json: str, profile: dict, feedback: str = "", prefer_provider: str = None) -> dict:
     """
     AGENT 3: The Modernization Transformer.
-    Generates target files according to the chosen profile (FastAPI or Spring Boot).
+    Executes a 3-stage micro-pipeline for Python (FastAPI + SQLAlchemy) or
+    a structured pass for Spring Boot.
     """
     is_python = "fastapi" in profile["id"]
 
+    if is_python:
+        try:
+            print("[AGENT 3 - STAGE 1/3] Generating Database & ORM Domain Models...")
+            s1_files = _agent3_stage1_domain(project_bundle_text, bsg_json, profile, feedback, prefer_provider)
+            models_code = s1_files.get("models.py", "")
+
+            print("[AGENT 3 - STAGE 2/3] Generating Pydantic V2 Schemas & CRUD Persistence...")
+            s2_files = _agent3_stage2_schemas_crud(bsg_json, models_code, profile, feedback, prefer_provider)
+            schemas_code = s2_files.get("schemas.py", "")
+            crud_code = s2_files.get("crud.py", "")
+
+            print("[AGENT 3 - STAGE 3/3] Generating FastAPI Router, Lifespan Seeder & Assembly...")
+            s3_files = _agent3_stage3_router_assembly(bsg_json, models_code, schemas_code, crud_code, profile, feedback, prefer_provider)
+
+            combined = {}
+            combined.update(s1_files)
+            combined.update(s2_files)
+            combined.update(s3_files)
+
+            # Ensure all required core Python files exist
+            if "main.py" in combined and "models.py" in combined:
+                print(f"[AGENT 3] Staged pipeline completed successfully with {len(combined)} files.")
+                return combined
+            else:
+                print(f"[AGENT 3 NOTICE] Staged pipeline missing core files ({list(combined.keys())}). Falling back to monolithic generator.")
+        except Exception as e:
+            print(f"[AGENT 3 STAGED NOTICE] Error in staged pipeline: {e}. Falling back to monolithic generator.")
+
+    # Single-pass fallback / Spring Boot generator
     if is_python:
         file_instructions = (
             "You MUST generate all necessary files for FastAPI + SQLAlchemy at the project root level (NEVER put main.py inside an 'app/' subfolder):\n"

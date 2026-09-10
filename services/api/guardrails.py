@@ -97,6 +97,27 @@ def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
                     "for _d in ('frontend', 'static'):\n    if os.path.exists(_d):\n        app.mount('/', StaticFiles(directory=_d, html=True), name='spa')\n        break",
                     code
                 )
+
+            # 6. Normalize Pydantic V1 class Config to Pydantic V2 ConfigDict
+            if "class Config:" in code:
+                code = re.sub(
+                    r"class\s+Config\s*:\s*\n\s*(?:orm_mode|from_attributes)\s*=\s*True",
+                    "model_config = ConfigDict(from_attributes=True)",
+                    code
+                )
+                if "ConfigDict" in code and "from pydantic import" in code:
+                    if not re.search(r"from\s+pydantic\s+import\s+[^;\n]*\bConfigDict\b", code):
+                        code = re.sub(
+                            r"from\s+pydantic\s+import\s+",
+                            "from pydantic import ConfigDict, ",
+                            code,
+                            count=1
+                        )
+
+            # 7. Normalize CRUD function calls in main.py to positional arguments
+            if fname.endswith("main.py") and "crud." in code:
+                code = re.sub(r'\bcrud\.([a-zA-Z0-9_]+)\(db\s*=\s*db,\s*[a-zA-Z0-9_]+\s*=\s*([a-zA-Z0-9_]+)\)', r'crud.\1(db, \2)', code)
+                code = re.sub(r'\bcrud\.([a-zA-Z0-9_]+)\(db\s*=\s*db\)', r'crud.\1(db)', code)
         sanitized[fname] = code
 
     # 5. Ensure email-validator is present in requirements.txt if EmailStr is used
