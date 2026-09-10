@@ -29,17 +29,24 @@ def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
     1. Replaces 'response_status=' with 'status_code=' on FastAPI route decorators.
     2. Strips illegal trailing commas on unparenthesized single-line import statements (Python 3.14+ SyntaxError).
     3. Corrects 'from dotenv import load' to 'from dotenv import load_dotenv'.
+    4. Strips hallucinated 'response_list=' argument on FastAPI route decorators.
+    5. Fixes unsupported '.rightjoin()' in SQLAlchemy ORM queries to '.outerjoin()'.
     """
     sanitized = {}
     for fname, code in files_dict.items():
         if fname.endswith(".py"):
             # Fix FastAPI decorator response_status -> status_code
             code = re.sub(r"\bresponse_status\s*=", "status_code=", code)
+            # Fix hallucinated response_list parameter
+            code = re.sub(r",\s*response_list\s*=\s*[a-zA-Z0-9_.]+", "", code)
+            code = re.sub(r"\bresponse_list\s*=\s*[a-zA-Z0-9_.]+,\s*", "", code)
             # Fix illegal trailing commas in single-line imports for Python 3.14+
             code = re.sub(r'^(from\s+[^\n()]+\s+import\s+[^\n()]+?),\s*$', r'\1', code, flags=re.MULTILINE)
             code = re.sub(r'^(import\s+[^\n()]+?),\s*$', r'\1', code, flags=re.MULTILINE)
             # Fix common dotenv import typo
             code = re.sub(r'\bfrom\s+dotenv\s+import\s+load\b', 'from dotenv import load_dotenv', code)
+            # Fix unsupported rightjoin in SQLAlchemy
+            code = re.sub(r"\.rightjoin\(", ".outerjoin(", code)
         sanitized[fname] = code
     return sanitized
 

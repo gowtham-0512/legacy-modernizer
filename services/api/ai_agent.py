@@ -167,9 +167,12 @@ def unpack_project_files(files_dict: dict, output_dir: Path) -> list:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         if clean_path.endswith(".py"):
             content = re.sub(r"\bresponse_status\s*=", "status_code=", content)
+            content = re.sub(r",\s*response_list\s*=\s*[a-zA-Z0-9_.]+", "", content)
+            content = re.sub(r"\bresponse_list\s*=\s*[a-zA-Z0-9_.]+,\s*", "", content)
             content = re.sub(r'^(from\s+[^\n()]+\s+import\s+[^\n()]+?),\s*$', r'\1', content, flags=re.MULTILINE)
             content = re.sub(r'^(import\s+[^\n()]+?),\s*$', r'\1', content, flags=re.MULTILINE)
             content = re.sub(r'\bfrom\s+dotenv\s+import\s+load\b', 'from dotenv import load_dotenv', content)
+            content = re.sub(r"\.rightjoin\(", ".outerjoin(", content)
         with target_path.open("w", encoding="utf-8") as f:
             f.write(content.strip())
         written_files.append(clean_path)
