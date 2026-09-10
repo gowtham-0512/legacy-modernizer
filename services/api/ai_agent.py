@@ -396,16 +396,17 @@ def generate_modernization_report(
     return "\n".join(lines)
 
 
-def modernize_project(upload_dir, output_dir=None, export_path=None, target_stack="fastapi-sqlalchemy"):
+def modernize_project(upload_dir, output_dir=None, export_path=None, target_stack="fastapi-sqlalchemy", force_modernize=False):
     """
     Whole-Project Modernization Pipeline with Target Stack Selection and Guardrails:
     1. Scan & bundle legacy files.
-    2. Resolve target profile (fastapi-sqlalchemy or spring-boot-jpa).
-    3. Agent 1: Inventory analysis.
-    4. Agent 2: BSG Specification contract tailored to target stack.
-    5. Agent 3: Multi-file generation (AST + Secret + SQL Safety guardrails).
-    6. Agent 4: Test validation with self-healing feedback loop.
-    7. Generate report and 1-click Windows launcher.
+    2. Pre-flight Modern Tech Detection (skip if already modern unless force_modernize).
+    3. Resolve target profile (fastapi-sqlalchemy or spring-boot-jpa).
+    4. Agent 1: Inventory analysis.
+    5. Agent 2: BSG Specification contract tailored to target stack.
+    6. Agent 3: Multi-file generation (AST + Secret + SQL Safety guardrails).
+    7. Agent 4: Test validation with self-healing feedback loop.
+    8. Generate report and 1-click Windows launcher.
     """
     profile = get_profile(target_stack)
     is_python = "fastapi" in profile["id"]
@@ -423,6 +424,25 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
     bundle = bundle_project_files(str(upload_dir))
     if not bundle:
         return {"status": "error", "message": "No valid source or config files found in the uploaded directory."}
+
+    # Pre-Flight: Check if codebase is already modern
+    from .modern_detector import detect_modern_tech
+    detection = detect_modern_tech(bundle, target_stack=target_stack)
+
+    if detection["already_matches_target"] and not force_modernize:
+        print(f"[PRE-FLIGHT NOTICE] Project is already using {target_stack}! Skipping modernization.")
+        audit_md = detection["audit_markdown"]
+        with (output_dir / "MODERN_TECH_DETECTION.md").open("w", encoding="utf-8") as f:
+            f.write(audit_md)
+        return {
+            "status": "already_modern",
+            "message": detection["recommendation"],
+            "target_stack": target_stack,
+            "already_modern": True,
+            "detection": detection,
+            "generated_files": ["MODERN_TECH_DETECTION.md"],
+            "report": audit_md
+        }
 
     bundle_text = format_project_bundle(bundle)
     print(f"Bundled {len(bundle)} project files: {list(bundle.keys())}")

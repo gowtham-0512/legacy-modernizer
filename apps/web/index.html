@@ -323,6 +323,7 @@
                                             'bg-slate-800 text-slate-400 border-slate-700': jobStatus === 'IDLE',
                                             'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse': jobStatus === 'IN_PROGRESS',
                                             'bg-neon-emerald/15 text-neon-emerald border-neon-emerald/30': jobStatus === 'COMPLETED',
+                                            'bg-cyan-500/15 text-cyan-300 border-cyan-500/30': jobStatus === 'ALREADY_MODERN',
                                             'bg-rose-500/15 text-rose-400 border-rose-500/30': jobStatus === 'FAILED'
                                         }"
                                         class="px-3 py-1 rounded-full text-xs font-semibold border flex items-center gap-1.5"
@@ -343,6 +344,20 @@
                                         :style="'width: ' + progressPercent + '%'">
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- Already Modern Notice Banner -->
+                            <div x-show="isAlreadyModern" x-transition class="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 space-y-2">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2 font-semibold text-xs text-cyan-300">
+                                        <i data-lucide="shield-check" class="w-4 h-4 text-cyan-400"></i>
+                                        <span>Architecture Already Modern!</span>
+                                    </div>
+                                    <button @click="startModernization(true)" class="text-xs px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-medium transition">
+                                        ⚡ Re-scaffold Anyway
+                                    </button>
+                                </div>
+                                <p class="text-xs text-slate-300 leading-relaxed" x-text="modernNotice"></p>
                             </div>
 
                             <!-- 5-Stage Stepper List -->

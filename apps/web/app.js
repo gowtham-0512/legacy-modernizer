@@ -21,6 +21,8 @@ function modernizerApp() {
         activeFileContent: '',
         copied: false,
         errorMessage: '',
+        isAlreadyModern: false,
+        modernNotice: '',
         history: [],
         stageTimer: null,
 
@@ -154,7 +156,7 @@ function modernizerApp() {
             this.refreshIcons();
         },
 
-        async startModernization() {
+        async startModernization(force = false) {
             if (this.files.length === 0 || this.isProcessing) return;
 
             this.isProcessing = true;
@@ -164,6 +166,8 @@ function modernizerApp() {
             this.progressPercent = 15;
             this.stageStatusDetail = 'Ingesting source files into isolated %LOCALAPPDATA% workspace...';
             this.errorMessage = '';
+            this.isAlreadyModern = false;
+            this.modernNotice = '';
             this.generatedFiles = [];
             this.activeFile = null;
             this.activeFileContent = '';
@@ -171,6 +175,7 @@ function modernizerApp() {
             const formData = new FormData();
             formData.append('project_name', this.projectName || 'Legacy_Project');
             formData.append('target_stack', this.selectedProfile);
+            formData.append('force_modernize', force ? 'true' : 'false');
 
             this.files.forEach(f => {
                 const path = f.webkitRelativePath || f.name;
@@ -213,9 +218,20 @@ function modernizerApp() {
                 this.currentJobId = data.job_id;
                 this.currentStep = 5;
                 this.progressPercent = 100;
-                this.jobStatus = 'COMPLETED';
-                this.jobStatusText = 'Completed (100%)';
-                this.stageStatusDetail = 'All files synthesized, guardrails passed, and ZIP packaged!';
+
+                if (data.already_modern) {
+                    this.isAlreadyModern = true;
+                    this.modernNotice = data.message || 'Codebase already matches target modern architecture.';
+                    this.jobStatus = 'ALREADY_MODERN';
+                    this.jobStatusText = 'Already Modern (Skipped)';
+                    this.stageStatusDetail = 'Architecture already up-to-date. Redundant AI generation safely skipped.';
+                } else {
+                    this.isAlreadyModern = false;
+                    this.modernNotice = '';
+                    this.jobStatus = 'COMPLETED';
+                    this.jobStatusText = 'Completed (100%)';
+                    this.stageStatusDetail = 'All files synthesized, guardrails passed, and ZIP packaged!';
+                }
 
                 await this.loadJobFiles(this.currentJobId);
 

@@ -35,6 +35,7 @@ async def upload_files(
     files: List[UploadFile] = File(...),
     project_name: Optional[str] = Form("legacy_project"),
     target_stack: Optional[str] = Form("fastapi-sqlalchemy"),
+    force_modernize: Optional[bool] = Form(False),
     db: Session = Depends(get_db)
 ):
     """
@@ -77,7 +78,8 @@ async def upload_files(
             upload_dir=workspace.input_dir,
             output_dir=workspace.output_dir,
             export_path=workspace.export_zip_path,
-            target_stack=chosen_stack
+            target_stack=chosen_stack,
+            force_modernize=bool(force_modernize)
         )
 
         if ai_result.get("status") == "error":
@@ -90,15 +92,18 @@ async def upload_files(
         archive_base = str(workspace.export_dir / "modernized_project")
         shutil.make_archive(archive_base, "zip", str(workspace.output_dir))
 
-        # Update record to success
-        job_record.status = "COMPLETED"
+        is_already_modern = ai_result.get("status") == "already_modern"
+
+        # Update record to success or already_modern
+        job_record.status = "ALREADY_MODERN" if is_already_modern else "COMPLETED"
         job_record.progress_percent = 100
         job_record.completed_at = datetime.datetime.utcnow()
         db.commit()
 
         return {
-            "message": "Project uploaded and modernized successfully!",
+            "message": ai_result.get("message") if is_already_modern else "Project uploaded and modernized successfully!",
             "job_id": job_id,
+            "already_modern": is_already_modern,
             "total_files": len(saved_files),
             "files_saved": saved_files,
             "ai_status": ai_result,
