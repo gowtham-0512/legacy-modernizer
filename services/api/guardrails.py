@@ -90,6 +90,14 @@ def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
             # 4. Fix unsupported rightjoin in SQLAlchemy/SQLite
             code = re.sub(r"\.rightjoin\(", ".outerjoin(", code)
         sanitized[fname] = code
+
+    # 5. Ensure email-validator is present in requirements.txt if EmailStr is used
+    uses_email_str = any("EmailStr" in v for k, v in sanitized.items() if k.endswith(".py"))
+    if uses_email_str:
+        req_key = next((k for k in sanitized if k.endswith("requirements.txt")), None)
+        if req_key and "email-validator" not in sanitized[req_key]:
+            sanitized[req_key] = sanitized[req_key].strip() + "\nemail-validator>=2.0.0\n"
+
     return sanitized
 
 
