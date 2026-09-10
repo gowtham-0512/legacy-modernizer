@@ -149,10 +149,19 @@ def agent2_specification_generator(project_bundle_text: str, agent1_json: str, p
 
 
 def unpack_project_files(files_dict: dict, output_dir: Path) -> list:
-    """Writes files into output_dir preserving directory structure."""
+    """Writes files into output_dir preserving directory structure, auto-normalizing root files."""
     written_files = []
+    has_nested_main = any(k in ("app/main.py", "app\\main.py") for k in files_dict.keys())
+
     for rel_path, content in files_dict.items():
         clean_path = rel_path.lstrip("/\\")
+        if has_nested_main and clean_path.startswith(("app/", "app\\")):
+            sub_path = clean_path[4:]
+            if "/" not in sub_path and "\\" not in sub_path:
+                clean_path = sub_path
+                content = re.sub(r"\bfrom\s+app\.([a-zA-Z0-9_]+)\s+import\b", r"from \1 import", content)
+                content = re.sub(r"\bfrom\s+app\s+import\b", r"import", content)
+
         target_path = output_dir / clean_path
         target_path.parent.mkdir(parents=True, exist_ok=True)
         with target_path.open("w", encoding="utf-8") as f:
@@ -170,15 +179,17 @@ def agent3_modernization_transformer(project_bundle_text: str, bsg_json: str, pr
 
     if is_python:
         file_instructions = (
-            "You MUST generate all necessary files for FastAPI + SQLAlchemy:\n"
-            "1. 'main.py' (FastAPI application & endpoints)\n"
-            "2. 'database.py' (SQLAlchemy engine, sessionmaker, safe URL-encoded connection)\n"
+            "You MUST generate all necessary files for FastAPI + SQLAlchemy at the project root level (NEVER put main.py inside an 'app/' subfolder):\n"
+            "1. 'main.py' (FastAPI application & endpoints at ROOT level, with CORS and static mount for frontend)\n"
+            "2. 'database.py' (Synchronous SQLAlchemy 2.0 engine, SessionLocal, standard sqlite:///./app.db fallback - DO NOT use aiosqlite or async engine)\n"
             "3. 'models.py' (SQLAlchemy ORM models matching database schema)\n"
             "4. 'schemas.py' (Pydantic models for request/response validation)\n"
-            "5. 'migrate_data.py' (Safe, read-only source migration script that seeds tables into target MySQL/SQLite)\n"
+            "5. 'crud.py' (Complete, non-truncated database query functions)\n"
             "6. 'requirements.txt' (All pip dependencies needed to run the project, using flexible version bounds like >=)\n"
             "7. '.env.example' (Environment variables needed with dummy placeholder values)\n\n"
             "CRITICAL GUARDRAIL RULES:\n"
+            "- ALWAYS put main.py directly at the root, NOT inside app/main.py.\n"
+            "- ALWAYS use synchronous SQLAlchemy: create_engine('sqlite:///./app.db') - NEVER use async engine or aiosqlite.\n"
             "- NEVER hardcode raw secrets, passwords, or API keys. Put placeholders in .env.example.\n"
             "- NEVER generate DROP DATABASE or unconditional DROP TABLE statements.\n"
             "- In 'database.py': ALWAYS use 'from urllib.parse import quote_plus' to encode database passwords.\n"
