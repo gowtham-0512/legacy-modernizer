@@ -541,6 +541,25 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
             written_files = unpack_project_files(final_files_dict, output_dir)
             print(f"Unpacked {len(written_files)} files: {written_files}")
 
+            # Pre-Flight Runtime Gate: Verify main.py imports cleanly without runtime crashes
+            if is_python:
+                try:
+                    boot_check = subprocess.run(
+                        [sys.executable, "-c", "import main"],
+                        capture_output=True, text=True, cwd=str(output_dir), timeout=10
+                    )
+                    if boot_check.returncode != 0:
+                        boot_err = boot_check.stderr or boot_check.stdout
+                        print(f"[PRE-FLIGHT GATE FAILED] {boot_err[:250]}")
+                        preferred_provider = "gemini"
+                        feedback = (
+                            f"The project crashed when imported with Python:\n{boot_err}\n"
+                            "Fix all invalid parameters, imports, or syntax errors and regenerate cleanly."
+                        )
+                        continue
+                except Exception as e:
+                    print(f"[PRE-FLIGHT GATE NOTICE] {e}")
+
             # Agent 4: Generate automated tests
             test_code = agent4_equivalence_validator(final_files_dict, bsg_json, profile)
             

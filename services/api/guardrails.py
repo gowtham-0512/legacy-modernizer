@@ -23,29 +23,71 @@ def validate_python_syntax(filename: str, code_content: str) -> Tuple[bool, Opti
         return False, f"AST Parsing Error in {filename}: {str(e)}"
 
 
+class FastAPIDecoratorSanitizer(ast.NodeTransformer):
+    """
+    Universal AST compiler-level guardrail for FastAPI route decorators.
+    Inspects all @app.(get|post|put|delete|patch) and @router.(get|post|put|delete|patch).
+    Enforces the official FastAPI signature:
+    - Automatically maps status aliases ('response_status', 'status', 'http_status') to 'status_code'.
+    - Automatically drops ANY unapproved hallucinated keyword arguments (e.g. 'response_list', 'response_type', etc.).
+    """
+    ALLOWED_KWARGS = {
+        'response_model', 'status_code', 'tags', 'dependencies',
+        'summary', 'description', 'response_description', 'responses',
+        'deprecated', 'operation_id', 'response_class', 'include_in_schema',
+        'name', 'methods', 'response_model_include', 'response_model_exclude',
+        'response_model_by_alias', 'response_model_exclude_unset',
+        'response_model_exclude_defaults', 'response_model_exclude_none',
+        'callbacks', 'openapi_extra', 'generate_unique_id_function'
+    }
+
+    STATUS_ALIASES = {'response_status', 'status', 'http_status'}
+
+    def visit_FunctionDef(self, node):
+        self.generic_visit(node)
+        for dec in node.decorator_list:
+            if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
+                if dec.func.attr in {'get', 'post', 'put', 'delete', 'patch', 'options', 'head'}:
+                    new_keywords = []
+                    for kw in dec.keywords:
+                        if kw.arg in self.STATUS_ALIASES:
+                            kw.arg = 'status_code'
+                            new_keywords.append(kw)
+                        elif kw.arg in self.ALLOWED_KWARGS:
+                            new_keywords.append(kw)
+                        # All other unknown kwargs are safely and silently stripped!
+                    dec.keywords = new_keywords
+        return node
+
+
 def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
     """
-    Deterministically sanitizes and corrects common LLM syntax/parameter hallucinations:
-    1. Replaces 'response_status=' with 'status_code=' on FastAPI route decorators.
-    2. Strips illegal trailing commas on unparenthesized single-line import statements (Python 3.14+ SyntaxError).
-    3. Corrects 'from dotenv import load' to 'from dotenv import load_dotenv'.
-    4. Strips hallucinated 'response_list=' argument on FastAPI route decorators.
-    5. Fixes unsupported '.rightjoin()' in SQLAlchemy ORM queries to '.outerjoin()'.
+    Deterministically sanitizes and corrects common LLM syntax/parameter hallucinations
+    using both AST transformation and regex normalizations.
     """
     sanitized = {}
     for fname, code in files_dict.items():
         if fname.endswith(".py"):
-            # Fix FastAPI decorator response_status -> status_code
-            code = re.sub(r"\bresponse_status\s*=", "status_code=", code)
-            # Fix hallucinated response_list parameter
-            code = re.sub(r",\s*response_list\s*=\s*[a-zA-Z0-9_.]+", "", code)
-            code = re.sub(r"\bresponse_list\s*=\s*[a-zA-Z0-9_.]+,\s*", "", code)
-            # Fix illegal trailing commas in single-line imports for Python 3.14+
+            # 1. Universal AST FastAPI decorator sanitizer
+            try:
+                tree = ast.parse(code)
+                new_tree = FastAPIDecoratorSanitizer().visit(tree)
+                ast.fix_missing_locations(new_tree)
+                code = ast.unparse(new_tree)
+            except Exception:
+                # Fallback to targeted regexes if AST parse fails before cleanup
+                code = re.sub(r"\bresponse_status\s*=", "status_code=", code)
+                code = re.sub(r",\s*response_list\s*=\s*[a-zA-Z0-9_.]+", "", code)
+                code = re.sub(r"\bresponse_list\s*=\s*[a-zA-Z0-9_.]+,\s*", "", code)
+
+            # 2. Fix illegal trailing commas in single-line imports for Python 3.14+
             code = re.sub(r'^(from\s+[^\n()]+\s+import\s+[^\n()]+?),\s*$', r'\1', code, flags=re.MULTILINE)
             code = re.sub(r'^(import\s+[^\n()]+?),\s*$', r'\1', code, flags=re.MULTILINE)
-            # Fix common dotenv import typo
+
+            # 3. Fix common dotenv import typo
             code = re.sub(r'\bfrom\s+dotenv\s+import\s+load\b', 'from dotenv import load_dotenv', code)
-            # Fix unsupported rightjoin in SQLAlchemy
+
+            # 4. Fix unsupported rightjoin in SQLAlchemy/SQLite
             code = re.sub(r"\.rightjoin\(", ".outerjoin(", code)
         sanitized[fname] = code
     return sanitized
