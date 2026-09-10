@@ -662,6 +662,13 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
             written_spa = unpack_project_files(spa_files, output_dir)
             print(f"[FRONTEND] Auto-synthesized modern Tailwind + Alpine SPA ({len(written_spa)} files) for entity '{entity_meta['entity_name']}'")
 
+        # Mirror frontend to static directory so FastAPI static mounts succeed regardless of naming convention
+        target_static = output_dir / "static"
+        if target_frontend.exists() and not target_static.exists():
+            shutil.copytree(target_frontend, target_static, dirs_exist_ok=True)
+        elif target_static.exists() and not target_frontend.exists():
+            shutil.copytree(target_static, target_frontend, dirs_exist_ok=True)
+
         # 6. Generate MODERNIZATION_REPORT.md
         all_output_files = list(final_files_dict.keys()) + [
             "MODERNIZATION_REPORT.md", "project_bsg.json", "project_inventory.json"
