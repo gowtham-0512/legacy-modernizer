@@ -118,6 +118,10 @@ def sanitize_python_files(files_dict: Dict[str, str]) -> Dict[str, str]:
             if fname.endswith("main.py") and "crud." in code:
                 code = re.sub(r'\bcrud\.([a-zA-Z0-9_]+)\(db\s*=\s*db,\s*[a-zA-Z0-9_]+\s*=\s*([a-zA-Z0-9_]+)\)', r'crud.\1(db, \2)', code)
                 code = re.sub(r'\bcrud\.([a-zA-Z0-9_]+)\(db\s*=\s*db\)', r'crud.\1(db)', code)
+
+            # 8. Strip hallucinated dummy placeholder decorators (e.g. @(post_login_route_placeholder := None))
+            code = re.sub(r'@\([a-zA-Z0-9_]+\s*:=\s*None\)\s*\n', '', code)
+            code = re.sub(r'@[a-zA-Z0-9_]*placeholder[a-zA-Z0-9_]*\s*\n', '', code, flags=re.IGNORECASE)
         sanitized[fname] = code
 
     # 5. Ensure email-validator is present in requirements.txt if EmailStr is used
