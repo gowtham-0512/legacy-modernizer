@@ -21,8 +21,8 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 
-# Verified active models with seamless failover
-DEFAULT_GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "groq/compound"]
+# Verified active models with seamless failover (excluding weak 20b models that truncate multi-file output)
+DEFAULT_GROQ_MODELS = ["openai/gpt-oss-120b"]
 DEFAULT_OPENROUTER_MODELS = ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free", "cohere/north-mini-code:free"]
 DEFAULT_GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-3.6-flash"]
 
@@ -208,23 +208,25 @@ def call_gemini(system_prompt: str, user_prompt: str, json_mode: bool = True, re
     raise last_error or RuntimeError("All Gemini fallback models failed.")
 
 
-GROQ_TOKEN_CEILING = 6500  # Safe threshold under Groq free tier 8,000 TPM limit
+GROQ_TOKEN_CEILING = 3500  # Safe threshold under Groq free tier 8,000 TPM limit (accounting for code density)
 
 def estimate_tokens(text: str) -> int:
-    """Rough estimation of token count (~4 characters per token)."""
-    return len(text) // 4
+    """Estimation of token count for dense code (~3 characters per token)."""
+    return len(text) // 3
 
 
 def generate_completion(
     system_instruction: str,
     user_prompt: str,
     json_mode: bool = True,
-    max_retries: int = 2
+    max_retries: int = 2,
+    prefer_provider: str = None
 ) -> str:
     """
     Unified Tri-Tier Entry Point with Smart Routing:
-    1. If prompt > 6,500 tokens: routes directly to Gemini (1M context) or OpenRouter (200k context).
-    2. If prompt <= 6,500 tokens:
+    1. If prefer_provider is specified ('gemini' or 'openrouter'), routes directly to that provider.
+    2. If prompt > 3,500 tokens: routes directly to Gemini (1M context) or OpenRouter (200k context).
+    3. If prompt <= 3,500 tokens:
        - Tier 1: Groq (Primary 300 t/s)
        - Tier 2: OpenRouter (Smart free meta-router fallback)
        - Tier 3: Gemini (Flash Lite 1,500 requests/day safety net)
@@ -233,12 +235,30 @@ def generate_completion(
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", OPENROUTER_API_KEY)
     gemini_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
 
-    est_tokens = estimate_tokens(system_instruction + user_prompt)
     errors = []
 
-    # 1. Direct Route for Large Multi-File Bundles (> 6,500 tokens)
+    # Direct preference routing (e.g. for failover or code generation)
+    if prefer_provider == "gemini" and gemini_key and gemini_key != "your_gemini_api_key_here":
+        try:
+            print("[AI ENGINE] Invoking Gemini Flash Lite directly per preferred provider routing...")
+            return call_gemini(system_instruction, user_prompt, json_mode=json_mode)
+        except Exception as e:
+            errors.append(f"Preferred Gemini: {e}")
+            print(f"[AI ENGINE] Preferred Gemini error: {e}. Falling back to standard pipeline...")
+
+    elif prefer_provider == "openrouter" and openrouter_key and openrouter_key != "your_openrouter_api_key_here":
+        try:
+            print("[AI ENGINE] Invoking OpenRouter directly per preferred provider routing...")
+            return call_openrouter(system_instruction, user_prompt)
+        except Exception as e:
+            errors.append(f"Preferred OpenRouter: {e}")
+            print(f"[AI ENGINE] Preferred OpenRouter error: {e}. Falling back to standard pipeline...")
+
+    est_tokens = estimate_tokens(system_instruction + user_prompt)
+
+    # 1. Direct Route for Multi-File Code Generation (> 3,500 tokens)
     if est_tokens > GROQ_TOKEN_CEILING:
-        print(f"[AI ENGINE] Prompt size (~{est_tokens} tokens) exceeds Groq limit ({GROQ_TOKEN_CEILING}). Routing to Gemini (1M context)...")
+        print(f"[AI ENGINE] Prompt size (~{est_tokens} tokens) exceeds Groq safe limit ({GROQ_TOKEN_CEILING}). Routing directly to Gemini (1M context, 8k output)...")
         if gemini_key and gemini_key != "your_gemini_api_key_here":
             try:
                 return call_gemini(system_instruction, user_prompt, json_mode=json_mode)
@@ -253,7 +273,7 @@ def generate_completion(
                 errors.append(f"OpenRouter Large Route: {or_err}")
                 print(f"[AI ENGINE] OpenRouter notice: {or_err}")
 
-    # 2. Tier 1: Try Groq as Primary for normal-sized prompts (300 t/s)
+    # 2. Tier 1: Try Groq as Primary for small prompts (300 t/s)
     elif groq_key and groq_key != "your_groq_api_key_here":
         try:
             return call_groq(system_instruction, user_prompt, json_mode=json_mode)
