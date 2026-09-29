@@ -5,10 +5,111 @@ to determine if the codebase already uses modern architectures (e.g. FastAPI, SQ
 Spring Boot 3, React, Next.js) before running AI modernization agents.
 """
 
-from __future__ import annotations
-
+import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List
+import numpy as np
+
+MODEL_FILE = Path(__file__).resolve().parent / "ml" / "architectural_classifier.joblib"
+_cached_ml_model = None
+
+def get_ml_classifier():
+    global _cached_ml_model
+    if _cached_ml_model is None and MODEL_FILE.exists():
+        try:
+            import joblib
+            _cached_ml_model = joblib.load(MODEL_FILE)
+        except Exception:
+            _cached_ml_model = False
+    return _cached_ml_model if _cached_ml_model is not False else None
+
+
+def predict_project_ml_metrics(project_bundle: Dict[str, str]) -> Dict[str, Any]:
+    """Runs the trained Random Forest classifier across project files to predict architectural complexity."""
+    clf = get_ml_classifier()
+    if not clf or not project_bundle:
+        return {
+            "ml_model_active": False,
+            "architecture_pattern": "Undetermined",
+            "refactoring_risk_score": 50.0,
+            "confidence_percent": 0.0
+        }
+
+    legacy_sig = re.compile(r"\b(javax\.servlet|java\.sql|HttpServlet|ActionForm|ActionForward|JspWriter|ResultSet|Statement|PreparedStatement|org\.apache\.struts)\b", re.IGNORECASE)
+    modern_sig = re.compile(r"\b(fastapi|pydantic|BaseModel|ConfigDict|APIRouter|Depends|AsyncSession|sqlalchemy\.orm|SQLModel)\b", re.IGNORECASE)
+
+    file_features = []
+    for fname, content in project_bundle.items():
+        if not fname.lower().endswith((".java", ".py", ".jsp", ".sql", ".js")):
+            continue
+        lines = content.splitlines()
+        code_lines = [l for l in lines if l.strip() and not l.strip().startswith(("#", "//", "/*", "*"))]
+        loc = len(code_lines)
+        if loc == 0:
+            continue
+
+        branches = len(re.findall(r"\b(if|else if|elif|for|while|case|catch|except)\b", content))
+        cyclomatic = max(1, branches)
+        nesting = max([len(l) - len(l.lstrip()) for l in code_lines]) // 4 if code_lines else 0
+        nesting = min(nesting, 10)
+
+        sql_count = len(re.findall(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|CREATE TABLE|ALTER TABLE)\b", content, re.IGNORECASE))
+        sql_density = sql_count / loc if loc > 0 else 0.0
+
+        classes = len(re.findall(r"\b(class|interface)\s+[A-Za-z0-9_]+", content))
+        methods = len(re.findall(r"\b(def|public|private|protected)\s+[A-Za-z0-9_]+\s*\(", content))
+        comment_lines = len([l for l in lines if l.strip().startswith(("#", "//", "/*", "*"))])
+        comment_ratio = comment_lines / (loc + comment_lines) if (loc + comment_lines) > 0 else 0.0
+
+        legacy_imp = len(legacy_sig.findall(content))
+        modern_imp = len(modern_sig.findall(content))
+
+        feats = [
+            np.log1p(loc),
+            cyclomatic,
+            nesting,
+            round(sql_density, 4),
+            classes,
+            methods,
+            round(comment_ratio, 4),
+            legacy_imp,
+            modern_imp
+        ]
+        file_features.append(feats)
+
+    if not file_features:
+        return {
+            "ml_model_active": True,
+            "architecture_pattern": "Undetermined",
+            "refactoring_risk_score": 50.0,
+            "confidence_percent": 0.0
+        }
+
+    probs = clf.predict_proba(file_features)  # [prob_class0, prob_class1, prob_class2]
+    mean_probs = np.mean(probs, axis=0)
+
+    # Class 0: Legacy Monolith, Class 1: Legacy DAO/SQL, Class 2: Modern Microservice
+    labels = ["Legacy Monolith", "Legacy Data Access / DAO", "Modern Microservice"]
+    dominant_class = int(np.argmax(mean_probs))
+    pattern = labels[dominant_class]
+
+    # Refactoring Risk: probability of being legacy (class 0 or 1) * 100
+    legacy_prob = mean_probs[0] + (mean_probs[1] if len(mean_probs) > 1 else 0)
+    risk_score = round(float(legacy_prob) * 100.0, 1)
+    confidence = round(float(mean_probs[dominant_class]) * 100.0, 1)
+
+    return {
+        "ml_model_active": True,
+        "architecture_pattern": pattern,
+        "refactoring_risk_score": risk_score,
+        "confidence_percent": confidence,
+        "class_probabilities": {
+            "legacy_monolith": round(float(mean_probs[0]) * 100, 1),
+            "legacy_dao": round(float(mean_probs[1]) * 100, 1) if len(mean_probs) > 1 else 0.0,
+            "modern_microservice": round(float(mean_probs[2]) * 100, 1) if len(mean_probs) > 2 else 0.0,
+        }
+    }
 
 
 # Modern framework signature patterns
@@ -197,6 +298,9 @@ def detect_modern_tech(project_bundle: Dict[str, str], target_stack: str = "fast
             f"Legacy architecture detected. Ready for automated modernization to {target_stack}."
         )
 
+    # Machine Learning Pre-Flight Classification
+    ml_result = predict_project_ml_metrics(project_bundle)
+
     # Markdown audit summary
     summary_lines = [
         "# Modern Architecture Pre-Flight Audit",
@@ -205,6 +309,11 @@ def detect_modern_tech(project_bundle: Dict[str, str], target_stack: str = "fast
         f"- **Matches Target Architecture**: `{'Yes' if already_matches_target else 'No'}`",
         f"- **Backend Status**: `{'MODERN' if is_modern_backend else ('LEGACY' if has_legacy_backend else 'UNDETERMINED')}`",
         f"- **Frontend Status**: `{'MODERN' if has_modern_frontend else ('LEGACY' if has_legacy_frontend else 'N/A')}`",
+        "",
+        "### Machine Learning Pre-Flight Classification",
+        f"- **ML Predicted Pattern**: `{ml_result.get('architecture_pattern', 'N/A')}`",
+        f"- **Refactoring Complexity Score**: `{ml_result.get('refactoring_risk_score', 0.0)} / 100`",
+        f"- **Classification Confidence**: `{ml_result.get('confidence_percent', 0.0)}%`",
         "",
         "### Detected Technologies",
     ]
@@ -233,5 +342,6 @@ def detect_modern_tech(project_bundle: Dict[str, str], target_stack: str = "fast
         "detected_legacy_indicators": list(detected_legacy.keys()),
         "matched_target_frameworks": matched_target_tech,
         "recommendation": recommendation,
+        "ml_classification": ml_result,
         "audit_markdown": "\n".join(summary_lines),
     }

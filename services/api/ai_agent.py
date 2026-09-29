@@ -77,7 +77,7 @@ def format_project_bundle(bundle: dict) -> str:
     return "\n".join(formatted_parts)
 
 
-def agent1_legacy_analyzer(project_bundle_text: str) -> str:
+def agent1_legacy_analyzer(project_bundle_text: str, ml_context: str = "") -> str:
     """
     AGENT 1: The Legacy Analyzer (Whole-Project).
     Extracts structural components, database contracts, and implicit business rules.
@@ -97,9 +97,10 @@ def agent1_legacy_analyzer(project_bundle_text: str) -> str:
     )
 
     print("[AGENT 1] Analyzing legacy project artifacts...")
+    prompt_header = f"{ml_context}\n\n" if ml_context else ""
     raw_response = generate_completion(
         system_instruction=system_instruction,
-        user_prompt=f"PROJECT ARTIFACT BUNDLE:\n{project_bundle_text}",
+        user_prompt=f"{prompt_header}PROJECT ARTIFACT BUNDLE:\n{project_bundle_text}",
         json_mode=True
     )
     parsed = clean_and_parse_json(raw_response)
@@ -112,7 +113,7 @@ def agent1_legacy_analyzer(project_bundle_text: str) -> str:
         return json.dumps(parsed, indent=2)
 
 
-def agent2_specification_generator(project_bundle_text: str, agent1_json: str, profile: dict) -> str:
+def agent2_specification_generator(project_bundle_text: str, agent1_json: str, profile: dict, ml_context: str = "") -> str:
     """
     AGENT 2: The Specification Generator.
     Transforms legacy inventory into a target-stack Behavioral Specification Graph (BSG).
@@ -135,9 +136,10 @@ def agent2_specification_generator(project_bundle_text: str, agent1_json: str, p
     )
 
     print(f"[AGENT 2] Generating Behavioral Specification Graph for {profile['name']}...")
+    prompt_header = f"{ml_context}\n\n" if ml_context else ""
     raw_response = generate_completion(
         system_instruction=system_instruction,
-        user_prompt=f"Agent 1 Project Inventory:\n{agent1_json}\n\nProject Artifact Bundle:\n{project_bundle_text}",
+        user_prompt=f"{prompt_header}Agent 1 Project Inventory:\n{agent1_json}\n\nProject Artifact Bundle:\n{project_bundle_text}",
         json_mode=True
     )
     parsed = clean_and_parse_json(raw_response)
@@ -503,7 +505,8 @@ def generate_modernization_report(
     bsg_str: str,
     generated_files: list,
     guardrail_summary: dict,
-    profile: dict
+    profile: dict,
+    ml_summary: dict = None
 ) -> str:
     """Generates a structured Markdown report reflecting the selected target stack."""
     try:
@@ -535,18 +538,34 @@ def generate_modernization_report(
         f"**Target Stack Profile:** `{profile['name']}`",
         f"**Backend:** `{profile['backend']}` | **Database:** `{profile['database_layer']}`",
         "\n---\n",
-        "## 1. Guardrail Verification & Security Summary",
+    ]
+
+    if ml_summary and ml_summary.get("ml_model_active"):
+        lines.extend([
+            "## 1. Machine Learning Architectural Pre-Flight Audit",
+            f"- **Predicted Architecture Pattern:** `{ml_summary.get('architecture_pattern')}`",
+            f"- **Refactoring Complexity Score:** `{ml_summary.get('refactoring_risk_score')} / 100`",
+            f"- **Classification Confidence:** `{ml_summary.get('confidence_percent')}%`",
+            "\n---\n",
+            "## 2. Guardrail Verification & Security Summary",
+        ])
+    else:
+        lines.extend([
+            "## 1. Guardrail Verification & Security Summary",
+        ])
+
+    lines.extend([
         f"- **Syntax Validation:** `{guardrail_summary.get('syntax_status', 'Passed')}`",
         f"- **Secret Leak Detection:** `{guardrail_summary.get('secrets_status', '0 Leaks Detected')}`",
         f"- **Database Safety Guardrail:** `{guardrail_summary.get('sql_safety_status', 'Read-Only Safe')}`",
         f"- **Automated Behavioral Tests:** `{guardrail_summary.get('test_status', 'Verified')}`",
         "\n",
-        "## 2. Architecture Transformation",
+        "## 3. Architecture Transformation",
         f"- **Detected Legacy Framework:** `{meta.get('detected_framework', 'Legacy Full-Stack')}`",
         f"- **Detected Database:** `{meta.get('database_type', 'Relational SQL')}`",
         f"- **Entry Points Modernized:** `{entry_points_str}`",
         "\n"
-    ]
+    ])
 
     if configs and isinstance(configs, list):
         lines.append("### Detected Configurations Preserved:")
@@ -667,13 +686,29 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
     }
 
     try:
+        # Prepare Machine Learning Pre-Flight Context
+        ml_info = detection.get("ml_classification", {})
+        ml_context = ""
+        if ml_info and ml_info.get("ml_model_active"):
+            pattern = ml_info.get("architecture_pattern", "Legacy Monolith")
+            risk_score = ml_info.get("refactoring_risk_score", 50.0)
+            confidence = ml_info.get("confidence_percent", 0.0)
+            ml_context = (
+                f"[PRE-FLIGHT MACHINE LEARNING CLASSIFICATION]\n"
+                f"- Predicted Architecture Pattern: {pattern}\n"
+                f"- Refactoring Complexity Score: {risk_score}/100\n"
+                f"- Model Confidence: {confidence}%\n"
+                f"GUIDANCE: Pay special attention to decomposition of complex monolithic controllers and raw database access."
+            )
+            print(f"[ML PRE-FLIGHT] Pattern: {pattern} | Risk Score: {risk_score}/100 (Confidence: {confidence}%)")
+
         # 2. Agent 1: Legacy Analyzer
-        inventory_json = agent1_legacy_analyzer(bundle_text)
+        inventory_json = agent1_legacy_analyzer(bundle_text, ml_context=ml_context)
         with (output_dir / "project_inventory.json").open("w", encoding="utf-8") as f:
             f.write(inventory_json)
 
         # 3. Agent 2: Specification Generator
-        bsg_json = agent2_specification_generator(bundle_text, inventory_json, profile)
+        bsg_json = agent2_specification_generator(bundle_text, inventory_json, profile, ml_context=ml_context)
         with (output_dir / "project_bsg.json").open("w", encoding="utf-8") as f:
             f.write(bsg_json)
 
@@ -872,7 +907,9 @@ def modernize_project(upload_dir, output_dir=None, export_path=None, target_stac
         if is_python and "test_suite.py" not in all_output_files:
             all_output_files.append("test_suite.py")
 
-        report_md = generate_modernization_report(inventory_json, bsg_json, all_output_files, guardrail_summary, profile)
+        report_md = generate_modernization_report(
+            inventory_json, bsg_json, all_output_files, guardrail_summary, profile, ml_summary=ml_info
+        )
         with (output_dir / "MODERNIZATION_REPORT.md").open("w", encoding="utf-8") as f:
             f.write(report_md)
 
